@@ -147,3 +147,51 @@ in `output/star_tours_62s/dwell/`, overview plot as `overview.png`.
 Known limitation stands: the pipeline knows the waveform cold but can't
 tell the Starspeeder's engines from the score -- auditory streaming /
 object formation is the big v1 gap.
+
+## Speech channel (2026-09-30): hva/transcribe.py
+
+The v1 gap above has a first step. A local whisper model
+(faster-whisper, base, int8 CPU) transcribes the 16 kHz mono track to
+timestamped segments with per-word times and confidence scores,
+aligned to the 100 ms moment grid (`align_to_moments`). Speech onsets
+-- a segment starting after >= 0.4 s of silence -- become first-class
+attention events (`speech_events`), so the attention system can treat
+linguistic onsets the way it treats acoustic captures.
+
+Why: the whole point of speech. Frequency-band attention hears
+*transients*; dialogue-driven media is steered by *words*. The Dr Tran
+runs showed the narrator's voice relocating visual attention (joint
+peak yanked 170 px to the speaking screen) while the audio pipeline
+itself had no representation of what was said.
+
+Honest limits, stated up front:
+- v1 is verbatim transcription -- superhuman. No human catches every
+  word. Per-segment avg_logprob and per-word probabilities are
+  recorded as the hook for a future mishearing model.
+- "Perfect" hearing still misinterprets: transcription is not
+  comprehension. Word sense, sarcasm, reference are not modeled.
+  Deferred explicitly, not forgotten.
+- No diarization in v1: turns are approximated from segment
+  boundaries + gaps, not voice identity.
+
+First transcript (Dr Tran Ep 17, first 30 s): 14 segments, 5 speech
+events, 80.9% of moments carrying speech. The narrator's affected
+delivery bends the model ("Dr. Dre" for "Dr. Tran", "eye-time machine"
+for "a time machine") but the content lands: "This one comes from AJ,
+who writes," ... "do you have a time machine and a laser cannon?" ...
+"Stop it! Just stop sending me letters!" -- the fan-mail frame the
+visual analysis hypothesized, confirmed in the words.
+
+Setup friction, recorded so nobody repeats it: faster-whisper will
+not install on OS-managed system Pythons (PEP 668 + Debian RECORD
+fights) -- use the pipeline venv. Its HF download client chokes on
+some egress proxy configs (httpx URL parse failure); the model files
+were fetched with curl -L (HF now redirects to a CDN) into
+models/faster-whisper-base. Note: the Systran faster-whisper-{tiny,
+base, small, medium} repos predate the ctranslate2 4.x model format --
+they ship vocabulary.txt while ctranslate2>=4.0 demands
+vocabulary.json. The vocab is identical across whisper sizes, so the
+fix is large-v3's vocabulary.json dropped into the base model dir.
+Also: the large-v3 preprocessor_config.json floating around claims
+feature_size 128 -- whisper is 80; the wrong value breaks the encoder
+shape. The repo-local preprocessor_config.json is corrected to 80.

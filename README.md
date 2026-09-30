@@ -54,6 +54,19 @@ point: it reports what a human would have perceived, which is less
 than what's there, and that's what makes the review human-shaped.
 **`scripts/perceive.py`** does the same for still images.
 
+**`hva/transcribe.py` -- the speech channel.** A local whisper model
+(faster-whisper, base) transcribes the 16 kHz mono track to
+timestamped segments with per-word times and confidence, aligned to
+the 100 ms moment grid. Speech onsets become first-class attention
+events instead of anonymous transients -- the pipeline can now hear
+*words*, which is the whole point of speech. v1 is verbatim
+transcription (superhuman: no human catches every word); confidence
+scores are recorded as the hook for a future mishearing model, and
+transcription-is-not-comprehension is explicitly deferred. Requires
+the pipeline venv (`../.venv-pipeline`, relative to the repo root) --
+system Pythons managed by the OS fight the install. Model weights live in
+`models/faster-whisper-base` (gitignored, downloaded once).
+
 ## Running it
 
 ```bash
@@ -63,6 +76,17 @@ python3 -m hva.battery              # audio validation battery (from repo root)
 # Fusion needs a video + its audio side by side; see scripts/fuse_av.py
 # --help. input/ and output/ are gitignored: bring your own media.
 ```
+
+Speech transcription needs the venv (faster-whisper fights
+OS-managed system Pythons):
+
+```bash
+python3 -m venv ../.venv-pipeline
+../.venv-pipeline/bin/pip install faster-whisper numpy
+# model weights: see hva/transcribe.py MODEL_DIR (models/faster-whisper-base,
+# gitignored -- download once, ~150 MB)
+../.venv-pipeline/bin/python scripts/transcribe.py \
+    --wav input/clip_16k.wav --out output/transcripts/clip.json
 
 ## Status
 
