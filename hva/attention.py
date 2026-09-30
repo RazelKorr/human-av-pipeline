@@ -104,6 +104,7 @@ class AuditoryAttention:
             sal = np.clip(sal, 0, None)
 
             event = None
+            event_target = None  # bin the onset captured to (if any)
             # onset interrupt: sharp transient yanks focus (express).
             # Threshold is the 95th percentile of recent Tmax -- it fires
             # on the most transient 5% of moments, adapting to busy vs.
@@ -141,6 +142,7 @@ class AuditoryAttention:
                             self.pending = (tgt,
                                             t0 + ONSET_LATENCY_MS / 1000.0)
                             event = "onset-capture"
+                            event_target = float(tgt)
                             self.hab[key] = recent + [t0]
 
             # scheduled switch at moment boundary (unless silent:
@@ -177,5 +179,6 @@ class AuditoryAttention:
                 "cf_bin": self.cf, "cf_hz": C.bin_to_hz(
                     np.clip(int(round(self.cf)), 0, C.N_BINS - 1)),
                 "band": (lo, hi), "loud": m["loud"], "event": event,
+                "target": event_target,
             })
         return trace

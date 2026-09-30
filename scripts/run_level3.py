@@ -51,22 +51,34 @@ STEREO = os.path.join(ROOT, "input", "star_tours_0-62s_44k_stereo.wav")
 def load_mono_16k(path):
     with wave.open(path, "rb") as w:
         n = w.getnframes()
-        return np.frombuffer(w.readframes(n),
-                             dtype=np.int16).astype(np.float32) / 32768.0
+        ch = w.getnchannels()
+        raw = np.frombuffer(w.readframes(n),
+                            dtype=np.int16).astype(np.float32) / 32768.0
+        if ch == 2:  # fold stereo down to mono
+            raw = raw.reshape(-1, 2).mean(axis=1)
+        return raw
 
 
 def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--seconds", type=float, default=62.0)
+    ap.add_argument("--video", default=VIDEO)
+    ap.add_argument("--mono", default=MONO)
+    ap.add_argument("--stereo", default=STEREO,
+                    help="44.1kHz stereo wav for ILD pan; falls back to "
+                         "--mono when omitted (centered audio)")
+    ap.add_argument("--outdir", default=OUTDIR)
     args = ap.parse_args()
     seconds = args.seconds
-    os.makedirs(OUTDIR, exist_ok=True)
+    outdir = args.outdir
+    stereo_path = args.stereo or args.mono
+    os.makedirs(outdir, exist_ok=True)
 
     # ---- vision: per-moment salience (sensory part only) ----
     print("vision: decoding...", flush=True)
     frames = [(t, f) for t, f in
-              run_video.decode_gray(VIDEO, seconds, 10.0, 224, 224)]
+              run_video.decode_gray(args.video, seconds, 10.0, 224, 224)]
     n_mom = min(int(seconds * 10), len(frames))
     vis_sal = np.zeros((n_mom, SIZE, SIZE), dtype=np.float32)
     trans = np.zeros((SIZE, SIZE), dtype=np.float32)
@@ -83,7 +95,7 @@ def main():
 
     # ---- audio: per-moment transient profile (mono) ----
     print("audio: mono transient profile...", flush=True)
-    x = load_mono_16k(MONO)
+    x = load_mono_16k(args.mono)
     t, f, Sg = C.stft_log(x)
     feat = S.salience_map(Sg)
     moms = M.moments(Sg, feat["sal"], t)
@@ -106,12 +118,23 @@ def main():
 
     # ---- audio: per-bin pan from stereo ILD ----
     print("audio: stereo ILD pans...", flush=True)
-    with wave.open(STEREO, "rb") as w:
+    with wave.open(stereo_path, "rb") as w:
         n = w.getnframes()
+        ch = w.getnchannels()
+        sr = w.getframerate()
         raw = np.frombuffer(w.readframes(n),
                             dtype=np.int16).astype(np.float32) / 32768.0
-    L = resample_poly(raw[0::2], 160, 441)
-    R = resample_poly(raw[1::2], 160, 441)
+    import math as _math
+    g = _math.gcd(16000, sr)
+    up, down = 16000 // g, sr // g
+    if ch == 2:
+        # stereo at sr Hz -> 16k per channel
+        L = resample_poly(raw[0::2], up, down)
+        R = resample_poly(raw[1::2], up, down)
+    else:
+        # mono fallback: resample to 16k, centered pan
+        L = resample_poly(raw, up, down)
+        R = L.copy()
     _, _, S_l = C.stft_log(L)
     _, _, S_r = C.stft_log(R)
     pan_bin = np.zeros((n_mom, C.N_BINS), dtype=np.float32)
@@ -143,6 +166,15 @@ def main():
     print(f"Level 3 report ({n_mom / 10.0:.0f}s, {n_mom} moments)")
     print(f"  joint-map saccades: {len(joint['scanpath']) - 1}; "
           f"vision-only saccades: {len(visonly['scanpath']) - 1}")
+    # saccade landings pair by index (same clock, same times)
+    js = np.array(joint["scanpath"])
+    vs = np.array(visonly["scanpath"])
+    n_sac = min(len(js), len(vs))
+    land = np.hypot(js[:n_sac, 1] - vs[:n_sac, 1],
+                    js[:n_sac, 2] - vs[:n_sac, 2])
+    print(f"  saccade landing displacement: mean {land.mean():.1f}px, "
+          f"max {land.max():.1f}px; "
+          f"{(land > 16).sum()} of {n_sac} landings moved >16px")
     print(f"  audio moved the peak >8px in {moved.sum()} moments "
           f"({100 * moved.mean():.1f}%)")
     print(f"  mean displacement: {disp.mean():.1f}px; "
@@ -153,27 +185,62 @@ def main():
               f"(joint peak map-px {jp[m, 0]:.0f},{jp[m, 1]:.0f})")
 
     # ---- read path: map-gained auditory attention ----
+    # The map doesn't just rescale the transient profile -- the gained
+    # profile has to drive the attention module's *decisions*. The
+    # onset detector thresholds on m["Tmax"] and the switcher argmaxes
+    # m["sal"], so feeding the raw moments with a scaled Tprof changes
+    # nothing (2026-09-30: captures came out 26/26 identical). Build
+    # gained moment dicts: same timing/loudness, spatially amplified
+    # salience and transient peaks.
     probe = JointPriorityMap()
     gains = np.ones_like(Tprof)
     for m in range(n_mom):
         probe.map = joint["maps"][m]
         gains[m] = probe.gains_for_pans(pan_bin[m])
+    moms_gain = []
+    for k, m in enumerate(moms[:n_mom]):
+        g = dict(m)
+        g["sal"] = (m["sal"] * gains[k]).astype(np.float32)
+        g["Tmax"] = float((Tprof[k] * gains[k]).max())
+        moms_gain.append(g)
     att = AT.AuditoryAttention(cf_init=32.0)
     tr_base = att.run(moms[:n_mom], Tprof)
     att2 = AT.AuditoryAttention(cf_init=32.0)
-    tr_gain = att2.run(moms[:n_mom], Tprof * gains)
+    tr_gain = att2.run(moms_gain, Tprof * gains)
     cap = lambda tr: sum(1 for e in tr if e["event"] == "onset-capture")
     swi = lambda tr: sum(1 for e in tr if e["event"] == "switch")
-    print(f"  audio captures: baseline {cap(tr_base)}, "
-          f"map-gained {cap(tr_gain)}; "
-          f"switches: {swi(tr_base)} vs {swi(tr_gain)}")
+    n_cb, n_cg = cap(tr_base), cap(tr_gain)
+    n_sb, n_sg = swi(tr_base), swi(tr_gain)
+    print(f"  audio captures: baseline {n_cb}, "
+          f"map-gained {n_cg}; "
+          f"switches: {n_sb} vs {n_sg}")
+    div = [k for k in range(n_mom)
+           if tr_base[k]["event"] != tr_gain[k]["event"]]
+    if div:
+        print(f"  first divergences at " +
+              ", ".join(f"{moms[d]['t0']:.1f}s" for d in div[:5]))
 
     # ---- save ----
-    np.savez(os.path.join(OUTDIR, "joint_maps.npz"),
+    evcode = {"onset-capture": 1, "switch": 2, "refractory": 3,
+              "dwell-quiet": 4}
+    enc = lambda tr: np.array([evcode.get(e["event"], 0) for e in tr],
+                              dtype=np.int8)
+    tgt = lambda tr: np.array([e["target"] if e["target"] is not None else -1
+                               for e in tr], dtype=np.float32)
+    np.savez(os.path.join(outdir, "joint_maps.npz"),
              maps=np.stack(joint["maps"][::1]),
              peaks_v=np.array(joint["peaks"]),
              peaks_visonly=np.array(visonly["peaks"]),
-             disp=disp)
+             disp=disp,
+             gains=gains,
+             pan_bin=pan_bin,
+             Tprof=Tprof,
+             events_base=enc(tr_base),
+             events_gain=enc(tr_gain),
+             cf_base=np.array([e["cf_bin"] for e in tr_base]),
+             cf_gain=np.array([e["cf_bin"] for e in tr_gain]),
+             tgt_base=tgt(tr_base),
+             tgt_gain=tgt(tr_gain))
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -191,8 +258,8 @@ def main():
         ax[1].set_xlabel("t (s)")
         fig.suptitle("Level 3: what audio did to the priority map")
         fig.tight_layout()
-        fig.savefig(os.path.join(OUTDIR, "level3.png"), dpi=90)
-        print("  saved output/level3/")
+        fig.savefig(os.path.join(outdir, "level3.png"), dpi=90)
+        print(f"  saved {outdir}/")
     except ImportError:
         print("  (matplotlib missing; skipped plot)")
 

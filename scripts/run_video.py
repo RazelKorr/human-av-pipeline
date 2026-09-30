@@ -61,7 +61,18 @@ def decode_gray(path, seconds, fps, w=None, h=None, t0=0.0):
             break
         f = np.frombuffer(raw, dtype=np.uint8).reshape(h, w)
         yield base + i * 1000.0 / fps, f.astype(np.float32) / 255.0
-    proc.wait()
+    # Don't bare-wait: if ffmpeg produced more frames than we read, its
+    # stdout pipe is full and it will never exit on its own (2026-09-30:
+    # wedged a Level 3 run for 8+ minutes in proc.wait()).
+    try:
+        proc.stdout.close()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
 
 
 def write_mp4(frames, path, fps=10):

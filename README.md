@@ -39,7 +39,10 @@ fusion, wagon-wheel reversal, saccadic suppression, change blindness --
   saccades toward the panned side (+alerting gain); visual transients
   lower the auditory capture bar (top quartile only -- the film's
   background wiggling doesn't get a vote).
-- **Level 3**: joint priority map (planned).
+- **Level 3** (`hvm/`, `scripts/run_level3.py`): joint priority map --
+  one shared 56x56 landscape both systems write to and read from.
+  Saccades land from the joint map; auditory attention reads spatial
+  gains back. Battery 5/5; real-media demo included. See SPEC_FUSION.md.
 
 **`scripts/watch.py`** ties all three together: feed it a video and it
 watches it the way a human would -- vision pipeline on the frames,
