@@ -114,3 +114,50 @@ def test_task_bias_reaches_the_map():
     loop.tick(100.0, vis, aud, 0.0, task_bias=direction_bias("left"))
     px, py, _ = loop.jmap.peak()
     assert px < 28, f"bias did not move the peak left (px={px})"
+
+
+def test_speaker_play_stop():
+    """Speaker tracks playback; stop() marks interruption."""
+    from hva.conversation import Speaker
+    import tempfile
+    # Fake a 2s audio file for duration probing.
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        path = f.name
+    import wave
+    with wave.open(path, "w") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 32000)  # 2 s of silence
+    sp = Speaker()
+    sp.play(path, now_s=10.0)
+    assert sp.is_playing(11.0)
+    assert not sp.is_playing(12.5)
+    assert sp.check_finished(12.5)
+    sp.play(path, now_s=20.0)
+    sp.stop()  # barge-in
+    assert sp.interrupted
+    assert not sp.is_playing(20.5)
+
+
+def test_energy_vad_fires_on_speech_onset():
+    """VAD fires ~300 ms after energy jumps above the noise floor."""
+    from hva.conversation import EnergyVAD
+    vad = EnergyVAD()
+    silence = np.zeros(1600, dtype=np.float32)
+    speech = (np.random.default_rng(0).standard_normal(1600)
+              .astype(np.float32) * 0.1)
+    # Settle the floor on silence.
+    for _ in range(20):
+        assert vad.update(silence) is False
+    # Speech: fires on the 3rd hot tick, then every 3 ticks while
+    # speech continues (sustained speech keeps the onset signal alive).
+    assert vad.update(speech) is False
+    assert vad.update(speech) is False
+    assert vad.update(speech) is True
+    assert vad.update(speech) is False
+    assert vad.update(speech) is False
+    assert vad.update(speech) is True
+    # Back to silence: floor re-adapts, no fire.
+    for _ in range(10):
+        assert vad.update(silence) is False

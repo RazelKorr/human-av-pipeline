@@ -107,3 +107,26 @@ policy branches.
 `tests/test_understanding.py`: 10 tests — intent classification,
 direction extraction, bias targeting, perceptual description, dialogue
 history, and the end-to-end language→map→peak proof. All pass.
+
+## Live duplex + barge-in (2026-09-30)
+
+`scripts/run_conversation.py` wires the pieces into one live loop:
+stream -> transcribe -> turn-detect -> grounded respond -> TTS -> Speaker.
+States: LISTENING -> (turn) -> RESPONDING -> (finished | barged in) -> LISTENING.
+
+**Barge-in:** while the Speaker is playing, an EnergyVAD watches the
+incoming mic at 100 ms resolution (adaptive noise floor, 300 ms hangover).
+Speech onset during playback stops the response immediately and returns
+to listening. The transcript is too slow for this (10-30 s lag); the VAD
+is the fast path. Assumes playback doesn't leak into the mic (headphones /
+virtual routing) -- echo cancellation is out of scope.
+
+Verified 2026-09-30 on a constructed 15 s scenario:
+hail ("Hi Wodehaus, can you hear me?") -> turn at 3.0 s -> response
+speaking -> interruption ("Wodehaus stop talking, never mind.") at 4.0 s
+-> **BARGE-IN at 4.3 s**, playback stopped -> interruption transcribed as
+a new turn at 7.3 s -> new response. Log: 2 turns, 1 barge-in.
+
+Known v1 limits: TTS blocks the tick loop; the Speaker simulates playback
+timing on this VM (no audio device) -- a real player plugs in via play_fn/
+stop_fn hooks. The LLM seam (ResponsePolicy.generate) is still open.

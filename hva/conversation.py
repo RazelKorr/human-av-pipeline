@@ -138,3 +138,97 @@ def speak(text: str, outpath: str,
         raise RuntimeError(
             f"tts failed: {proc.stderr.decode()[:500]}")
     return outpath
+
+
+def audio_duration(path: str) -> float:
+    """MP3/WAV duration in seconds via ffprobe."""
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
+        capture_output=True, text=True, timeout=30)
+    return float(proc.stdout.strip())
+
+
+class Speaker:
+    """Response playback state.
+
+    On this VM there is no audio device, so 'playing' is simulated by
+    tracking stream time against the file's duration. On a real host,
+    pass a play_fn that starts real playback and a stop_fn that halts
+    it; is_playing() then reflects the device. The barge-in logic only
+    needs is_playing()/stop(), so the simulation and the real device
+    are interchangeable.
+    """
+
+    def __init__(self, play_fn=None, stop_fn=None):
+        self.play_fn = play_fn
+        self.stop_fn = stop_fn
+        self.playing_until: float | None = None
+        self.current_file: str | None = None
+        self.interrupted = False  # True if the last playback was cut short
+
+    def play(self, path: str, now_s: float):
+        dur = audio_duration(path)
+        self.current_file = path
+        self.playing_until = now_s + dur
+        self.interrupted = False
+        if self.play_fn is not None:
+            self.play_fn(path)
+
+    def is_playing(self, now_s: float) -> bool:
+        return (self.playing_until is not None
+                and now_s < self.playing_until)
+
+    def stop(self):
+        """Barge-in: halt playback now."""
+        if self.stop_fn is not None:
+            self.stop_fn()
+        self.playing_until = None
+        self.interrupted = True
+        self.current_file = None
+
+    def check_finished(self, now_s: float) -> bool:
+        """True if playback completed naturally (not interrupted)."""
+        if self.playing_until is not None and now_s >= self.playing_until:
+            self.playing_until = None
+            self.current_file = None
+            return True
+        return False
+
+
+class EnergyVAD:
+    """Fast speech-onset detector for barge-in.
+
+    Per-tick RMS energy against an adaptive noise floor. Fires when
+    energy exceeds the floor by `ratio` for `hangover` consecutive
+    ticks (default 3 = 300 ms). This is the fast path -- the transcript
+    lags 10-30 s, but barge-in needs to react in under half a second.
+
+    Assumes the system's own playback does not leak into the mic
+    (headphones / virtual routing). Echo cancellation is out of scope.
+    """
+
+    def __init__(self, ratio: float = 4.0, hangover: int = 3,
+                 floor_alpha: float = 0.05, abs_floor: float = 1e-4):
+        self.ratio = ratio
+        self.hangover = hangover
+        self.floor_alpha = floor_alpha
+        self.abs_floor = abs_floor
+        self.noise_floor = abs_floor
+        self.hot_ticks = 0
+
+    def update(self, mono_100ms) -> bool:
+        """Feed one 100 ms mono chunk. Returns True on speech onset."""
+        import numpy as np
+        rms = float(np.sqrt(np.mean(np.asarray(mono_100ms) ** 2)) + 1e-12)
+        if rms < self.noise_floor * self.ratio:
+            # Quiet: adapt the floor toward it, reset the counter.
+            self.noise_floor = ((1 - self.floor_alpha) * self.noise_floor
+                                + self.floor_alpha * max(rms, self.abs_floor))
+            self.hot_ticks = 0
+            return False
+        self.hot_ticks += 1
+        if self.hot_ticks >= self.hangover:
+            self.hot_ticks = 0  # fire once per onset
+            return True
+        return False
