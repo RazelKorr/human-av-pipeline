@@ -49,8 +49,10 @@ scaffolding.
 
 - Stream vs batch joint peaks: **max difference 0.0000 map-px**.
 - Stream vs batch vision-only peaks: **max difference 0.0000 map-px**.
+- Saccade-count equivalence: **206/206** (stream vs batch, exact).
 - Identical statistics: 113 moments (18.2%) audio-moved, mean 13.6 px,
   max 188.2 px.
+- **6 regression tests** in `tests/test_streaming.py` (all pass).
 
 The stream is bit-exact with the batch. Three bugs were found and fixed
 during verification:
@@ -75,13 +77,13 @@ during verification:
 - **Demucs** is non-causal (needs the whole file). The live path
   transcribes the raw mix. Perception lags speech by ~10-30 s; the
   priority map stays real-time. Documented cost of causality, not a bug.
-- **Realtime wall-clock test**: `--realtime` exists but sustained
-  throughput vs lag hasn't been measured yet.
-- **Rolling Whisper latency**: the transcriber runs, but end-to-end
-  transcription lag hasn't been profiled.
-- **"Saying hi"** still needs: turn detection, a response policy, TTS,
-  and output-device plumbing. Hearing a call is plumbing (virtual mic
-  into the rolling buffer). Being heard is a second system.
+- **Realtime wall-clock (measured)**: 20 s of video in 21.9 s wall-clock,
+  compute at 0.36x realtime -- keeps pace. See `docs/saying-hi.md` latency budget.
+- **Rolling Whisper latency (measured)**: 30 s clip -> 2 windows, 4 segments,
+  15.6 s processing -- keeps up with realtime.
+- **"Saying hi"** has shipped: turn detection (`TurnDetector`), response policy
+  (`ResponsePolicy` v3), non-blocking TTS (`AsyncTTS`), live duplex + barge-in.
+  Remaining: mic capture, output-device plumbing on real hardware, echo handling.
 
 ## Design notes for live use
 

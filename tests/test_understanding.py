@@ -231,3 +231,57 @@ def test_llm_failure_falls_back_to_rules():
     reply = policy.generate(Turn("Wodehaus look right", 1.0))
     assert isinstance(reply, str)  # rule fallback answered
     assert policy.take_bias() is not None
+
+
+def test_select_llm_backend_none():
+    """none -> no backend, rule-based only."""
+    from hva.llm import select_llm_backend
+    backend, desc = select_llm_backend("none")
+    assert backend is None
+    assert "rule-based" in desc
+
+
+def test_select_llm_backend_api_no_key():
+    """api without key -> None, fallback described."""
+    from hva.llm import select_llm_backend
+    import os
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    backend, desc = select_llm_backend("api")
+    assert backend is None
+    assert "no key" in desc
+
+
+def test_select_llm_backend_api_with_key():
+    """api with key -> ApiGenerator, keyed."""
+    from hva.llm import select_llm_backend
+    backend, desc = select_llm_backend("api", api_model="test-model")
+    # Uses env key if present; if not, backend is None. Either way,
+    # the description must match the backend.
+    import os
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        assert backend is not None
+        assert "keyed" in desc
+    else:
+        assert backend is None
+        assert "no key" in desc
+
+
+def test_select_llm_backend_local_unreachable():
+    """local with no server -> None, unreachable described."""
+    from hva.llm import select_llm_backend
+    # Port 9 is discard; nothing listens there.
+    backend, desc = select_llm_backend(
+        "local", llm_url="http://localhost:9")
+    assert backend is None
+    assert "unreachable" in desc
+
+
+def test_select_llm_backend_auto_fallback():
+    """auto with no server and no key -> None."""
+    from hva.llm import select_llm_backend
+    import os
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    backend, desc = select_llm_backend(
+        "auto", llm_url="http://localhost:9")
+    assert backend is None
+    assert "none" in desc

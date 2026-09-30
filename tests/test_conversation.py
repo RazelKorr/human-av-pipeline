@@ -58,7 +58,8 @@ def test_response_policy_question_is_honest():
     pol = ResponsePolicy()
     reply = pol.generate(Turn("Wodehaus can you hear me?", 1.0))
     assert reply is not None
-    assert "don't understand" in reply or "hear" in reply
+    # Pinned to the actual template: honest "don't know" fallback.
+    assert "don't know what to make of that yet" in reply
 
 
 def test_response_policy_silent_when_not_addressed():
@@ -118,4 +119,33 @@ def test_async_tts_failure_does_not_kill_loop():
         assert tts.poll_ready() == []
         assert not tts.has_pending()
     finally:
+        tts.shutdown()
+
+
+def test_async_tts_cancel_pending():
+    """cancel_pending drops queued syntheses before they run."""
+    import threading
+    gate = threading.Event()
+
+    def blocking_speak(text, outpath, voice="v"):
+        gate.wait(timeout=5.0)  # block until released
+        return outpath
+
+    tts = AsyncTTS(max_workers=1, speak_fn=blocking_speak)
+    try:
+        # First submit occupies the worker; second queues behind it.
+        tts.submit("first", "/tmp/async_tts_c1.mp3")
+        tts.submit("second", "/tmp/async_tts_c2.mp3")
+        import time
+        time.sleep(0.2)  # let the first start, second stay queued
+        dropped = tts.cancel_pending()
+        assert dropped >= 1  # the queued one was cancelled
+        gate.set()  # release the worker
+        time.sleep(0.2)
+        ready = tts.poll_ready()
+        # Only the first (already running) completed.
+        assert len(ready) == 1
+        assert ready[0][1] == "first"
+    finally:
+        gate.set()
         tts.shutdown()

@@ -1,4 +1,4 @@
-"""Watch a video the way a human would, then review it like a speedster.
+"""Watch a video the way the model predicts a human would, then review it like a speedster.
 
 Ties all three systems together: the vision pipeline watches the frames,
 the audio pipeline listens to the soundtrack, and the L1 fusion puts them

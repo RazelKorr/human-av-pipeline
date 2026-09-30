@@ -5,15 +5,24 @@ The "saying hi" loop:
   1. TurnDetector watches the rolling transcript for the system's name
      plus end-of-utterance (silence after speech). When both hold, the
      turn is the system's.
-  2. ResponsePolicy decides what to say. V1 is template-based and honest
-     about its limits -- it reports what it heard, it does not pretend
-     to understand. The generate() interface is the seam where an LLM
-     plugs in later.
-  3. speak() synthesizes the response via the tts CLI.
+  2. ResponsePolicy decides what to say. V3 is grounded via
+     hva.understanding (reads the live perceptual loop) and LLM-backed
+     via hva.llm (ApiGenerator/LocalGenerator, with rule-based fallback).
+     It reports what it heard and saw; it does not pretend to understand
+     beyond its intents. The generate() interface is the seam where the
+     LLM plugs in.
+  3. speak() synthesizes the response via the tts CLI, non-blocking:
+     AsyncTTS runs synthesis on a background thread so the perceptual
+     tick loop never stalls. If the user barges in during synthesis,
+     the pending response is dropped as stale.
 
 Hearing a call is plumbing (audio into the rolling buffer -- hva.stream
 already does this). Being heard is a second system: this module plus a
 speaker or virtual audio device on the host.
+
+Live duplex: run_conversation.py wires the detector/policy/speak into
+the tick loop with EnergyVAD barge-in. If speech starts mid-response,
+playback stops and the turn is re-taken.
 
 Design notes:
   - Name matching is fuzzy on purpose. Whisper hears "Wodehaus" as
@@ -23,8 +32,8 @@ Design notes:
     transcript is what the policy reasons over. The cost is the
     transcription lag (window/step); the policy never claims to have
     heard words that haven't been transcribed yet.
-  - V1 does not barge in. It waits for the utterance to end. Interruption
-    is a later policy decision, not a missing feature.
+  - Barge-in is an EnergyVAD gate on the tick loop: speech energy above
+    the adaptive floor during playback/synthesis marks the turn stale.
 """
 import subprocess
 import concurrent.futures

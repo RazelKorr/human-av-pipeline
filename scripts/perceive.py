@@ -1,4 +1,4 @@
-"""Look at an image the way a human would: salience-driven saccades.
+"""Look at an image the way the model predicts a human would: salience-driven saccades.
 
 The prosthesis entry point. Hand it a picture, get back a plain-language
 report of where human-like attention goes, in order, and what it probably

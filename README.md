@@ -45,12 +45,12 @@ fusion, wagon-wheel reversal, saccadic suppression, change blindness --
   gains back. Battery 5/5; real-media demo included. See SPEC_FUSION.md.
 
 **`scripts/watch.py`** ties all three together: feed it a video and it
-watches it the way a human would -- vision pipeline on the frames,
+watches it the way the model predicts a human would -- vision pipeline on the frames,
 audio pipeline on the soundtrack, L1 fusion on one timeline -- then
 writes a plain-language perceptual review in a fraction of the clip's
 runtime. Sixty-two seconds of video, reviewed in seventeen. The
 bottlenecks (10 Hz moments, a fovea, an attentional blink) are the
-point: it reports what a human would have perceived, which is less
+point: it reports what the model predicts a human would have perceived, which is less
 than what's there, and that's what makes the review human-shaped.
 **`scripts/perceive.py`** does the same for still images.
 
@@ -74,6 +74,20 @@ someone is talking (`SPEECH_BOOST=1.0`, `hvm/priority.py`). The shared
 map's normalization does the attenuating -- when the ears get louder,
 everything else gets relatively quieter. Battery M6: speech flips an
 equal-strength flash/click conflict that vision otherwise wins.
+
+## Conversation (scripts/)
+
+The pipeline talks back. `scripts/run_conversation.py` runs the live
+loop: `TurnDetector` (name + end-of-utterance from the rolling
+transcript, fuzzy on Whisper's mishearings) -> `ResponsePolicy` v3
+(grounded in the live perceptual loop via `hva.understanding`, LLM
+seam via `hva.llm`, rule-based fallback) -> `AsyncTTS` (non-blocking
+synthesis so the 10 Hz tick never stalls). Live duplex with
+`EnergyVAD` barge-in: if you speak mid-response, playback stops and
+the turn is re-taken. `--llm {none,api,local,auto}` selects the
+language-model backend (default `none`; `auto` tries local
+llama-server, then API if `ANTHROPIC_API_KEY` is set). See
+`docs/saying-hi.md`.
 
 ## Running it
 
@@ -106,8 +120,8 @@ alignment experiment, not a validated multisensory-binding model.
 ## Provenance
 
 Entirely AI-generated -- vibecoded, as it were. Every line of code was
-written by Wodehaus, an AI agent (Muse, built by Meta), from RazelKorr
-RazelKorr's broad prompts and direction in September 2026. No code here
+written by Wodehaus, an AI agent (Muse, built by Meta), from RazelKorr's
+broad prompts and direction in September 2026. No code here
 was hand-written by a human; the human role was directing the work,
 testing the outputs, and making the design calls (the top-quartile gate
 on the vision->audio boost, the 100 ms shared moment grain, the call to

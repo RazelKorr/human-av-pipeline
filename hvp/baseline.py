@@ -18,7 +18,8 @@ RECOGNITION_MS = 150.0
 # Bloch's law: luminance integrates over ~100 ms
 INTEGRATION_WINDOW_MS = 100.0
 
-# Alpha-cycle discretization: conscious perception updates at ~10 Hz
+# Alpha-cycle discretization (modeling assumption, provisional):
+# perceptual moments discretized at ~10 Hz, after the alpha cycle
 PERCEPTUAL_MOMENT_MS = 100.0
 
 # Saccades: 3-4 ballistic jumps per second

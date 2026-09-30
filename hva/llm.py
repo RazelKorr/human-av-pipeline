@@ -156,3 +156,38 @@ class ApiGenerator:
             b.get("text", "") for b in data.get("content", [])
             if b.get("type") == "text"
         ).strip()
+
+
+def select_llm_backend(choice: str = "none",
+                       llm_url: str = "http://localhost:8080",
+                       api_model: str = "claude-haiku-4-5-20251001"):
+    """Pick an LLM backend for ResponsePolicy.
+
+    Returns (backend_or_None, description). Rule-based understand() is
+    always the fallback; the backend is the ceiling. Default is "none"
+    so a stray ANTHROPIC_API_KEY never spends money without an explicit
+    flag.
+
+    choice: "none" | "api" | "local" | "auto"
+      auto tries local llama-server first, then API if keyed, else none.
+    """
+    if choice == "none":
+        return None, "none (rule-based)"
+    if choice == "local":
+        gen = LocalGenerator(base_url=llm_url)
+        return (gen if gen.available else None,
+                f"local @ {llm_url} "
+                f"({'reachable' if gen.available else 'unreachable, fallback'})")
+    if choice == "api":
+        gen = ApiGenerator(model=api_model)
+        return (gen if gen.available else None,
+                f"api {api_model} "
+                f"({'keyed' if gen.available else 'no key, fallback'})")
+    # auto: local if reachable, else api if keyed, else none
+    local = LocalGenerator(base_url=llm_url)
+    if local.available:
+        return local, f"auto -> local @ {llm_url}"
+    api = ApiGenerator(model=api_model)
+    if api.available:
+        return api, f"auto -> api {api_model}"
+    return None, "auto -> none (no local server, no API key)"

@@ -16,7 +16,7 @@ science, not fitted parameters.
 | Retina → usable cortical signal | ~65 ms | LGN → V1; total pipeline latency **100 ms** |
 | Recognition / categorization | ~150 ms | the classic 150 ms categorization limit |
 | Temporal integration window (Bloch's law) | 100 ms | luminance sums over ~100 ms |
-| Perceptual moment (alpha-cycle discretization) | 100 ms | conscious perception updates at ~10 Hz |
+| Perceptual moment (alpha-cycle discretization) | 100 ms | modeling assumption: moments discretized at ~10 Hz, after the alpha cycle |
 | Saccade rate | ~3.5 Hz | 3–4 ballistic jumps per second |
 | Saccade duration | 21 + 2.2·A ms | main sequence; A = amplitude in degrees |
 | Saccadic suppression | full | effectively blind mid-saccade; displacement suppressed |

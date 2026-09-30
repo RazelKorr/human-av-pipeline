@@ -54,22 +54,28 @@ system's name appears in new words AND no word has ended within
 Only reasons over transcribed words — it never claims to have heard
 what the transcriber hasn't produced yet.
 
-**ResponsePolicy** (v2): grounded via `hva.understanding`. Attach a
+**ResponsePolicy** (v3): grounded via `hva.understanding`. Attach a
 live loop with `policy.perceptual = PerceptualState(loop)`; "look"
 biases land on `policy.pending_bias` for the tick loop to collect with
-`take_bias()`. `generate(turn)` remains the LLM seam.
+`take_bias()`. `generate(turn)` is the LLM seam: attach `ApiGenerator`
+(Anthropic API, needs `ANTHROPIC_API_KEY`) or `LocalGenerator`
+(llama-server at `--llm-url`) via `--llm {none,api,local,auto}`.
+A trailing `LOOK: <direction>` line in the LLM reply is stripped before
+speaking and converted to a task bias. No backend or API failure falls
+back to the rule-based `understand()`.
 
 **speak()**: synthesizes via `/opt/hatch/bin/tts speak` (default voice
-avocado_v2:MAI_03). Writes MP3 to a caller-chosen path.
+avocado_v2:MAI_03). Writes MP3 to a caller-chosen path. `AsyncTTS`
+synthesizes on a background thread so the perceptual tick loop never
+blocks; if the user speaks during synthesis, the pending response is
+dropped as stale.
 
-## What "saying hi" does NOT do yet
+## Known limits
 
-- **No real-time duplex.** The demo runs the loop on a clip. A live
-  call needs the stream runner feeding the transcriber continuously
-  with the detector/policy/speak in the tick loop — the pieces exist,
-  the wiring doesn't.
-- **No barge-in.** V1 waits for end-of-utterance. Interruption is a
-  policy decision for later.
+- **No mic capture yet.** The loop eats files/URLs as live; genuine
+  microphone or virtual-source input is desk work (VM has no `/dev/snd`).
+- **No echo cancellation.** Live mic + live speaker will hear itself;
+  needs handling or explicit routing assumptions.
 - **No deep understanding.** Intents are patterns, not semantics. The
   module reports what it did ("I looked left because you said left"),
   it does not pretend to grasp meaning.
@@ -100,10 +106,11 @@ Latency budget (measured 2026-09-30):
 
 ## Tests
 
-`tests/test_conversation.py`: 6 tests — name variants (including the
+`tests/test_conversation.py`: 8 tests — name variants (including the
 observed "would house" mishearing), turn firing on name+silence, no
 double-fire, unaddressed speech ignored, greeting/question/silence
-policy branches.
+policy branches, plus 2 AsyncTTS tests (ticks continue during slow
+synthesis; synthesis failure doesn't kill the loop).
 `tests/test_understanding.py`: 10 tests — intent classification,
 direction extraction, bias targeting, perceptual description, dialogue
 history, and the end-to-end language→map→peak proof. All pass.

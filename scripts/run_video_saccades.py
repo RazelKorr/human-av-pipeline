@@ -1,4 +1,4 @@
-"""Watch a real video the way a human does: salience-driven saccades.
+"""Watch a real video the way the model predicts a human does: salience-driven saccades.
 
 First pass: an attention driver (static center-surround + transient channel
 + inhibition of return, from hvp.attention) watches the decoded frames and
