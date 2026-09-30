@@ -17,6 +17,7 @@ never in the repo.
 """
 import json
 import os
+import urllib.parse
 import urllib.request
 
 SYSTEM_PROMPT = """\
@@ -166,6 +167,44 @@ class HFGenerator:
         return data["choices"][0]["message"]["content"].strip()
 
 
+class PollinationsGenerator:
+    """Pollinations.ai classic text endpoint -- no account, no key.
+
+    GET https://text.pollinations.ai/{prompt}?model=...&system=...
+    Keyless and free, rate-limited by IP. available is always True:
+    there is no credential to check, and any network/API failure
+    falls back to the rule-based understand() via ResponsePolicy,
+    same as the other backends.
+
+    Trade-offs, stated plainly: a third party (pollinations.ai) sees
+    the prompts, which include perceptual snapshots and dialogue.
+    Fine for prototyping; not for anything sensitive. No SLA, no
+    guaranteed model behind the label. The rules remain the floor.
+    """
+
+    BASE_URL = "https://text.pollinations.ai"
+
+    def __init__(self, model: str = "openai", timeout: float = 90.0):
+        self.model = model
+        self.timeout = timeout
+
+    @property
+    def available(self) -> bool:
+        return True  # keyless: nothing to validate without a request
+
+    def generate(self, payload: dict) -> str:
+        """Returns reply text (with any LOOK line still attached)."""
+        user_text = ("Perceptual snapshot and dialogue:\n"
+                     + json.dumps(payload, indent=1)
+                     + "\n\nRespond to the turn.")
+        query = urllib.parse.urlencode(
+            {"model": self.model, "system": SYSTEM_PROMPT})
+        url = (f"{self.BASE_URL}/{urllib.parse.quote(user_text)}?{query}")
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return resp.read().decode().strip()
+
+
 class ApiGenerator:
     """Anthropic Messages API backend for the generate() seam."""
 
@@ -217,7 +256,8 @@ class ApiGenerator:
 def select_llm_backend(choice: str = "none",
                        llm_url: str = "http://localhost:8080",
                        api_model: str = "claude-haiku-4-5-20251001",
-                       hf_model: str = "Qwen/Qwen3-8B"):
+                       hf_model: str = "Qwen/Qwen3-8B",
+                       free_model: str = "openai"):
     """Pick an LLM backend for ResponsePolicy.
 
     Returns (backend_or_None, description). Rule-based understand() is
@@ -225,9 +265,12 @@ def select_llm_backend(choice: str = "none",
     so a stray ANTHROPIC_API_KEY or HF_TOKEN never spends money or
     quota without an explicit flag.
 
-    choice: "none" | "api" | "local" | "hf" | "auto"
+    choice: "none" | "api" | "local" | "hf" | "free" | "auto"
+      free = Pollinations.ai classic endpoint: no account, no key.
       auto tries local llama-server first, then HuggingFace (free tier)
-      if tokened, then API if keyed, else none.
+      if tokened, then API if keyed, then the keyless free backend,
+      else none. Free before paid; your own credentials before a
+      public gateway.
     """
     if choice == "none":
         return None, "none (rule-based)"
@@ -241,13 +284,16 @@ def select_llm_backend(choice: str = "none",
         return (gen if gen.available else None,
                 f"hf {hf_model} "
                 f"({'tokened' if gen.available else 'no token, fallback'})")
+    if choice == "free":
+        gen = PollinationsGenerator(model=free_model)
+        return gen, f"free (pollinations.ai {free_model}, keyless)"
     if choice == "api":
         gen = ApiGenerator(model=api_model)
         return (gen if gen.available else None,
                 f"api {api_model} "
                 f"({'keyed' if gen.available else 'no key, fallback'})")
     # auto: local if reachable, else hf if tokened, else api if keyed,
-    # else none. Free before paid.
+    # else the keyless free backend, else none.
     local = LocalGenerator(base_url=llm_url)
     if local.available:
         return local, f"auto -> local @ {llm_url}"
@@ -257,4 +303,7 @@ def select_llm_backend(choice: str = "none",
     api = ApiGenerator(model=api_model)
     if api.available:
         return api, f"auto -> api {api_model}"
+    free = PollinationsGenerator(model=free_model)
+    if free.available:
+        return free, f"auto -> free (pollinations.ai {free_model}, keyless)"
     return None, "auto -> none (no local server, no HF token, no API key)"

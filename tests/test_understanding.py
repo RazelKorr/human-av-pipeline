@@ -331,14 +331,65 @@ def test_select_llm_backend_local_unreachable():
 
 
 def test_select_llm_backend_auto_fallback(monkeypatch):
-    """auto with no server and no key/token -> None."""
-    from hva.llm import select_llm_backend
+    """auto with no server, no HF token, no API key -> keyless free backend."""
+    from hva.llm import select_llm_backend, PollinationsGenerator
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     backend, desc = select_llm_backend(
         "auto", llm_url="http://localhost:9")
-    assert backend is None
-    assert "none" in desc
+    assert isinstance(backend, PollinationsGenerator)
+    assert "auto -> free" in desc
+
+
+def test_select_llm_backend_free():
+    """free -> PollinationsGenerator, always available, keyless."""
+    from hva.llm import select_llm_backend, PollinationsGenerator
+    backend, desc = select_llm_backend("free")
+    assert isinstance(backend, PollinationsGenerator)
+    assert backend.available
+    assert "keyless" in desc
+
+
+def test_free_generator_generate_mocked(monkeypatch):
+    """PollinationsGenerator builds the GET URL with prompt/system/model."""
+    import urllib.parse
+    import urllib.request
+    from hva.llm import PollinationsGenerator, SYSTEM_PROMPT
+
+    captured = {}
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return "plain text reply".encode()
+
+    def fake_urlopen(req, timeout=90.0):
+        captured["url"] = req.full_url
+        return FakeResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    gen = PollinationsGenerator(model="openai")
+    reply = gen.generate({"turn": "what do you see?"})
+    assert reply == "plain text reply"
+    parts = urllib.parse.urlparse(captured["url"])
+    assert parts.netloc == "text.pollinations.ai"
+    qs = urllib.parse.parse_qs(parts.query)
+    assert qs["model"] == ["openai"]
+    assert qs["system"] == [SYSTEM_PROMPT]
+    prompt = urllib.parse.unquote(parts.path.lstrip("/"))
+    assert "what do you see?" in prompt
+
+
+def test_select_llm_backend_auto_prefers_api_over_free(monkeypatch):
+    """auto -> api when keyed, even though the free backend is available."""
+    from hva.llm import select_llm_backend, ApiGenerator
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    backend, desc = select_llm_backend(
+        "auto", llm_url="http://localhost:9")
+    assert isinstance(backend, ApiGenerator)
+    assert "auto -> api" in desc
 
 
 def test_select_llm_backend_hf_no_token(monkeypatch):

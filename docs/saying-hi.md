@@ -60,9 +60,13 @@ biases land on `policy.pending_bias` for the tick loop to collect with
 `take_bias()`. `generate(turn)` is the LLM seam: attach `ApiGenerator`
 (Anthropic API, needs `ANTHROPIC_API_KEY`), `HFGenerator` (HuggingFace
 Inference Providers, needs `HF_TOKEN`, free tier, default model
-`Qwen/Qwen3-8B`), or `LocalGenerator` (llama-server at `--llm-url`)
-via `--llm {none,api,local,hf,auto}` (`--hf-model` overrides the HF
-model). `auto` tries local, then HF, then API — free before paid.
+`Qwen/Qwen3-8B`), `PollinationsGenerator` (Pollinations.ai classic
+endpoint — no account, no key, rate-limited by IP; a third party sees
+the prompts, so prototyping only), or `LocalGenerator` (llama-server
+at `--llm-url`) via `--llm {none,api,local,hf,free,auto}`
+(`--hf-model` / `--free-model` override the models). `auto` tries
+local, then HF, then API, then the keyless free backend — free before
+paid, your own credentials before a public gateway.
 A trailing `LOOK: <direction>` line in the LLM reply is stripped before
 speaking and converted to a task bias. No backend or API failure falls
 back to the rule-based `understand()`.
