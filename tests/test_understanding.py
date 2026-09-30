@@ -251,19 +251,72 @@ def test_select_llm_backend_api_no_key():
     assert "no key" in desc
 
 
-def test_select_llm_backend_api_with_key():
-    """api with key -> ApiGenerator, keyed."""
-    from hva.llm import select_llm_backend
+def test_select_llm_backend_api_with_key(monkeypatch):
+    """api with key -> ApiGenerator, keyed (deterministic via monkeypatch)."""
+    from hva.llm import select_llm_backend, ApiGenerator
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
     backend, desc = select_llm_backend("api", api_model="test-model")
-    # Uses env key if present; if not, backend is None. Either way,
-    # the description must match the backend.
-    import os
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        assert backend is not None
-        assert "keyed" in desc
-    else:
-        assert backend is None
-        assert "no key" in desc
+    assert backend is not None
+    assert isinstance(backend, ApiGenerator)
+    assert backend.api_key == "sk-test-fake-key"
+    assert "keyed" in desc
+
+
+def test_select_llm_backend_api_explicit_key(monkeypatch):
+    """ApiGenerator accepts key directly, not just via env."""
+    from hva.llm import ApiGenerator
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    gen = ApiGenerator(api_key="sk-direct-key", model="test-model")
+    assert gen.available
+    assert gen.api_key == "sk-direct-key"
+
+
+def test_select_llm_backend_local_reachable(monkeypatch):
+    """local with reachable server -> LocalGenerator."""
+    from hva.llm import select_llm_backend, LocalGenerator
+    import urllib.request
+
+    class FakeResp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=3: FakeResp())
+    backend, desc = select_llm_backend(
+        "local", llm_url="http://localhost:8080")
+    assert backend is not None
+    assert isinstance(backend, LocalGenerator)
+    assert "reachable" in desc
+
+
+def test_select_llm_backend_auto_prefers_local(monkeypatch):
+    """auto -> local when server reachable, even with API key set."""
+    from hva.llm import select_llm_backend, LocalGenerator
+    import urllib.request
+
+    class FakeResp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=3: FakeResp())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    backend, desc = select_llm_backend(
+        "auto", llm_url="http://localhost:8080")
+    assert isinstance(backend, LocalGenerator)
+    assert "auto -> local" in desc
+
+
+def test_select_llm_backend_auto_falls_to_api(monkeypatch):
+    """auto -> api when local unreachable but key is set."""
+    from hva.llm import select_llm_backend, ApiGenerator
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    backend, desc = select_llm_backend(
+        "auto", llm_url="http://localhost:9")
+    assert isinstance(backend, ApiGenerator)
+    assert "auto -> api" in desc
 
 
 def test_select_llm_backend_local_unreachable():

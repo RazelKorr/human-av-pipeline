@@ -106,7 +106,7 @@ Latency budget (measured 2026-09-30):
 
 ## Tests
 
-`tests/test_conversation.py`: 8 tests — name variants (including the
+`tests/test_conversation.py`: 9 tests — name variants (including the
 observed "would house" mishearing), turn firing on name+silence, no
 double-fire, unaddressed speech ignored, greeting/question/silence
 policy branches, plus 2 AsyncTTS tests (ticks continue during slow
