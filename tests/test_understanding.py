@@ -611,3 +611,29 @@ def test_look_at_no_memory_honest():
     reply, bias = understand("wodehaus look at the red car")
     assert bias is None
     assert "red car" in reply
+
+
+def test_is_addressed_wootouse_variant():
+    from hva.understanding import is_addressed
+    assert is_addressed("Hey, WooTouse.")  # observed 2026-09-30
+
+
+def test_resolve_referent_drops_trailing_narration():
+    from hva.understanding import resolve_referent
+    mem = ObjectMemory()
+    mem.add("windows", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    sighting, matched = resolve_referent("windows the", mem, 2000.0)
+    assert sighting is not None and matched == "windows"
+    sighting, matched = resolve_referent("red car the", mem, 2000.0)
+    assert sighting is None and matched == "red car the"
+
+
+def test_look_at_with_trailing_narration_grounds():
+    mem = ObjectMemory()
+    mem.add("windows", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    reply, bias = understand(
+        "Contact A Wood House Look at the windows The",
+        memory=mem, t_now_ms=2000.0)
+    assert "windows" in reply and bias is not None
+    iy, ix = divmod(bias.argmax(), 56)
+    assert (ix, iy) == (40, 20)

@@ -36,12 +36,12 @@ sys.path.insert(0, HERE)
 import run_video
 from hvp import attention as A
 from hvp import baseline as B
-from hvp.recognize import DARK_STREET_VOCAB, FovealClassifier
+from hvp.recognize import (DARK_STREET_VOCAB, FovealClassifier,
+                           foveal_crop_pil)
 from hvp.saccades import SaccadeController
 
 OUT = os.path.join(ROOT, "output")
 VSIZE = 224
-CROP_R = 48  # foveal crop half-width, px (matches closed_loop.dump_crops)
 
 
 def _bias(label, small, px, py):
@@ -64,20 +64,6 @@ def _bias(label, small, px, py):
     if label == "lit-floor":
         return 0.8 * bright * (yy < py).astype(np.float32), "look up"
     return np.zeros(S, np.float32), "none"
-
-
-def foveal_crop_pil(frame, fx, fy):
-    """96x96 foveal crop around (fx, fy), upscaled 2x, as PIL RGB."""
-    from PIL import Image
-    h, w = frame.shape
-    x0, x1 = max(0, int(fx) - CROP_R), min(w, int(fx) + CROP_R)
-    y0, y1 = max(0, int(fy) - CROP_R), min(h, int(fy) + CROP_R)
-    crop = frame[y0:y1, x0:x1]
-    pad = np.zeros((2 * CROP_R, 2 * CROP_R), np.float32)
-    pad[:crop.shape[0], :crop.shape[1]] = crop
-    big = np.kron(pad, np.ones((2, 2), np.float32))
-    arr = np.clip(big * 255.0, 0, 255).astype(np.uint8)
-    return Image.fromarray(arr, mode="L").convert("RGB")
 
 
 def manual_recognizer(labels, dva):

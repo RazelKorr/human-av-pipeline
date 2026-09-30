@@ -41,7 +41,7 @@ import threading
 
 from hva.understanding import (  # noqa: F401  (re-exported for callers)
     NAME_PATTERNS, _normalize, is_addressed,
-    DialogueState, PerceptualState, understand)
+    DialogueState, PerceptualState, ObjectMemory, understand)
 
 
 class Turn:
@@ -170,12 +170,15 @@ class ResponsePolicy:
         self.system_name = system_name
         self.perceptual: PerceptualState | None = None
         self.dialogue = DialogueState()
+        self.memory = ObjectMemory()  # fed by the foveal recognizer
         self.pending_bias = None  # 56x56 array for the tick loop, or None
         self.llm = None  # hva.llm.ApiGenerator or compatible
 
     def generate(self, turn: Turn) -> str | None:
         if not is_addressed(turn.text):
             return None
+        if self.perceptual is not None:
+            self.perceptual.memory = self.memory
         if self.llm is not None and self.llm.available:
             try:
                 return self._generate_llm(turn)
@@ -184,7 +187,9 @@ class ResponsePolicy:
                       flush=True)
         reply, bias = understand(turn.text,
                                  perceptual=self.perceptual,
-                                 dialogue=self.dialogue)
+                                 dialogue=self.dialogue,
+                                 memory=self.memory,
+                                 t_now_ms=turn.t_end * 1000.0)
         self.pending_bias = bias
         return reply
 

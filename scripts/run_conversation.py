@@ -39,6 +39,8 @@ from hva.stream import (StreamSource, VisionFrontEnd, AudioFrontEnd,
 from hva.conversation import (TurnDetector, ResponsePolicy, Speaker,
                               EnergyVAD, AsyncTTS)
 from hva.understanding import PerceptualState
+from hvp.recognize import (FovealClassifier, GENERAL_VOCAB,
+                           DARK_STREET_VOCAB, foveal_crop_pil)
 
 
 def main():
@@ -50,6 +52,12 @@ def main():
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--outdir", default="output/conversation")
     ap.add_argument("--model-size", default="base")
+    ap.add_argument("--foveal-vocab", default="none",
+                    choices=["none", "general", "dark-street"],
+                    help="foveal object recognition vocabulary feeding "
+                         "policy.memory ('what do you see?' / 'look at "
+                         "the X'): none=off, general=open-world labels, "
+                         "dark-street=Star-Tours gate/corridor labels")
     ap.add_argument("--tx-window", type=float, default=10.0,
                     help="transcription window s (smaller = more responsive)")
     ap.add_argument("--tx-step", type=float, default=3.0)
@@ -84,7 +92,22 @@ def main():
 
     detector = TurnDetector(silence_s=1.5)
     policy = ResponsePolicy()
-    policy.perceptual = PerceptualState(loop)
+    policy.perceptual = PerceptualState(loop, memory=policy.memory)
+
+    # --- foveal recognition: lazily loaded; classifies the fixated crop
+    # --- when gaze moves (throttled) and feeds policy.memory. Off unless
+    # --- --foveal-vocab names a vocabulary.
+    recognizer = None
+    if args.foveal_vocab != "none":
+        vocab = (list(DARK_STREET_VOCAB.items())
+                 if args.foveal_vocab == "dark-street"
+                 else [(n, n) for n in GENERAL_VOCAB])
+        _clf = FovealClassifier()
+        recognizer = lambda crop: _clf.classify(crop, vocab)
+    last_gaze = (112.0, 112.0)
+    last_recog_ms = -1e9
+    RECOG_MOVE_DEG = 2.0   # re-classify only after gaze moves this far
+    RECOG_MIN_GAP_MS = 400.0  # and at most ~2.5 classifications/second
 
     # --- LLM backend selection (the seam is real now) ---
     from hva.llm import select_llm_backend
@@ -122,9 +145,10 @@ def main():
         print(line, flush=True)
         log.append(line)
 
-    def process_measure(am, vis):
+    def process_measure(am, vis, frame):
         """One 100 ms audio measure through the full live loop."""
         nonlocal n_mom, n_turns, n_barges, n_dropped, drop_stale
+        nonlocal last_gaze, last_recog_ms
         t_ms = n_mom * 100.0
         now_s = t_ms / 1000.0
         aud = (am["Tprof_n"], am["pan"])
@@ -154,6 +178,24 @@ def main():
         # --- perception tick (with any language bias from last turn)
         # --- This never blocks on TTS: synthesis lives in AsyncTTS.
         loop.tick(t_ms, vis, aud, sp, task_bias=policy.take_bias())
+
+        # --- foveal recognition: the label stream for "what do you see?"
+        # --- and "look at the X". Classifies the fixated crop when gaze
+        # --- has moved; sightings accumulate in policy.memory.
+        if recognizer is not None and frame is not None:
+            _, gx, gy = loop.scanpath[-1]
+            moved_deg = (((gx - last_gaze[0]) ** 2
+                          + (gy - last_gaze[1]) ** 2) ** 0.5) * dva
+            if moved_deg > RECOG_MOVE_DEG and \
+                    t_ms - last_recog_ms >= RECOG_MIN_GAP_MS:
+                label, conf = recognizer(foveal_crop_pil(frame, gx, gy))
+                policy.memory.add(label, gx / 4.0, gy / 4.0,
+                                  t_ms=t_ms, conf=conf)
+                last_gaze = (gx, gy)
+                last_recog_ms = t_ms
+                if label != "unknown":
+                    note(f"RECOGNIZED '{label}' ({conf:.2f}) at "
+                         f"({gx:.0f},{gy:.0f})")
 
         # --- collect finished syntheses and start playback
         for outpath, _text in tts.poll_ready():
@@ -189,17 +231,20 @@ def main():
         n_mom += 1
 
     vis_queue = []
+    frame_queue = []
     try:
         for tick in source:
             vis_queue.append(vision_fe.push(tick.frame))
+            frame_queue.append(tick.frame)
             for am in audio_fe.push(tick):
-                process_measure(am, vis_queue.pop(0))
+                process_measure(am, vis_queue.pop(0), frame_queue.pop(0))
         # Flush trailing audio: the frontend works in 10 s chunks, so a
         # partial final chunk never emits unless flushed. Without this,
         # up to ~10 s of trailing audio -- and any turns in it -- is lost.
         for am in audio_fe.flush():
             vis = vis_queue.pop(0) if vis_queue else None
-            process_measure(am, vis)
+            frame = frame_queue.pop(0) if frame_queue else None
+            process_measure(am, vis, frame)
     finally:
         tts.shutdown()
 

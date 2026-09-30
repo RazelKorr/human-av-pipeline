@@ -315,3 +315,76 @@ def test_llm_no_backstop_without_look_intent():
     reply = pol.generate(Turn("Wodehaus, say hi.", 1.0))
     assert reply == "I heard you say hi."
     assert pol.pending_bias is None
+
+
+# -------------------------------------- item 4: label stream tests
+
+from hva.conversation import PerceptualState  # noqa: E402 (re-export)
+from hva.understanding import ObjectMemory  # noqa: E402
+
+
+class _FakeLoop:
+    """Minimal OnlineLevel3 stand-in: one fixation, quiet map."""
+    def __init__(self):
+        self.scanpath = [(0.0, 112.0, 112.0)]
+
+        class _Map:
+            def peak(self):
+                return (28.0, 28.0, 0.01)  # below the 0.05 mention threshold
+        self.jmap = _Map()
+
+
+def test_see_question_names_recognized_objects():
+    pol = ResponsePolicy()
+    pol.perceptual = PerceptualState(_FakeLoop(), memory=pol.memory)
+    pol.memory.add("gate", 14.0, 28.0, t_ms=1000.0, conf=0.8)
+    pol.memory.add("windows", 42.0, 20.0, t_ms=2000.0, conf=0.7)
+    reply = pol.generate(Turn("Wodehaus, what do you see?", 3.0))
+    assert reply is not None
+    assert "gate" in reply and "windows" in reply
+    # positions are qualitative, grounded in the sightings
+    assert "left" in reply and "right" in reply
+
+
+def test_see_question_no_objects_no_claim():
+    pol = ResponsePolicy()
+    pol.perceptual = PerceptualState(_FakeLoop(), memory=pol.memory)
+    reply = pol.generate(Turn("Wodehaus, what do you see?", 3.0))
+    assert reply is not None
+    assert "recognized" not in reply
+
+
+def test_policy_look_at_uses_memory():
+    pol = ResponsePolicy()
+    pol.perceptual = PerceptualState(_FakeLoop(), memory=pol.memory)
+    pol.memory.add("gate", 14.0, 28.0, t_ms=1000.0, conf=0.9)
+    reply = pol.generate(Turn("Wodehaus, look at the gate", 3.0))
+    assert reply is not None and "gate" in reply
+    bias = pol.take_bias()
+    assert bias is not None
+    iy, ix = divmod(bias.argmax(), 56)
+    assert (ix, iy) == (14, 28)
+    assert pol.take_bias() is None  # one-shot
+
+
+def test_policy_look_at_unknown_no_bias():
+    pol = ResponsePolicy()
+    pol.perceptual = PerceptualState(_FakeLoop(), memory=pol.memory)
+    pol.memory.add("gate", 14.0, 28.0, t_ms=1000.0, conf=0.9)
+    reply = pol.generate(Turn("Wodehaus, look at the red car", 3.0))
+    assert reply is not None and "red car" in reply
+    assert pol.take_bias() is None
+
+
+def test_describe_includes_recognized_objects():
+    mem = ObjectMemory()
+    mem.add("gate", 14.0, 28.0, t_ms=1000.0, conf=0.8)
+    p = PerceptualState(_FakeLoop(), memory=mem)
+    d = p.describe()
+    assert "gate" in d and "left" in d
+
+
+def test_describe_without_memory_unchanged():
+    p = PerceptualState(_FakeLoop())
+    d = p.describe()
+    assert "recognized" not in d

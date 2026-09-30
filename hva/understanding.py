@@ -54,6 +54,7 @@ NAME_PATTERNS = [
     r"wood\s+house",
     r"would\s+house",   # Whisper heard "Hi Wodehaus" as "I would house"
     r"what\s+house",
+    r"woo\s*touse",     # Whisper heard "Hey Wodehaus" as "Hey, WooTouse"
 ]
 
 
@@ -151,8 +152,9 @@ class PerceptualState:
     from here, not from language statistics.
     """
 
-    def __init__(self, loop):
+    def __init__(self, loop, memory: "ObjectMemory | None" = None):
         self.loop = loop  # OnlineLevel3
+        self.memory = memory  # ObjectMemory fed by the recognition loop
 
     def gaze_now(self) -> tuple[float, float]:
         """Current fixation in 224px (last saccade target)."""
@@ -181,6 +183,18 @@ class PerceptualState:
             parts.append(f"the most salient point right now is "
                          f"{_qualitative(px * 4.0, py * 4.0)}")
         parts.append(f"I've made {n_sac} saccades so far")
+        if self.memory is not None:
+            known = self.memory.known_objects()
+            if known:
+                bits = []
+                for name in known[:5]:
+                    s = self.memory.last_seen(name)
+                    if s is not None:
+                        bits.append(f"{name} "
+                                    f"({_qualitative(s[0] * 4.0, s[1] * 4.0)})")
+                    else:
+                        bits.append(name)
+                parts.append("I've recognized: " + ", ".join(bits))
         return ". ".join(parts) + "."
 
 
@@ -266,6 +280,14 @@ class ObjectMemory:
             break
         return best
 
+    def last_seen(self, name: str):
+        """Most recent sighting regardless of age: (map_x, map_y, conf)."""
+        want = _normalize_name(name)
+        for label, mx, my, t, conf in reversed(self.sightings):
+            if _normalize_name(label) == want:
+                return (mx, my, conf)
+        return None
+
     def known_objects(self) -> list[str]:
         """Labels seen, most recent first, deduplicated."""
         seen: list[str] = []
@@ -295,6 +317,24 @@ def extract_referent(text: str) -> str | None:
     if not m:
         return None
     return m.group(1).strip() or None
+
+
+def resolve_referent(candidate: str, memory: "ObjectMemory",
+                     t_now: float):
+    """Match a referent against memory, tolerating trailing narration.
+
+    Whisper merges hails with surrounding speech ('look at the windows
+    the'), so try the full candidate, then successively shorter
+    leading prefixes; first memory hit wins. Returns
+    (sighting, matched_name); (None, candidate) when nothing matches.
+    """
+    words = candidate.split()
+    for n in range(len(words), 0, -1):
+        name = " ".join(words[:n])
+        sighting = memory.locate(name, t_now)
+        if sighting is not None:
+            return sighting, name
+    return None, candidate
 
 
 # ---------------------------------------------------------- dialogue
@@ -363,15 +403,17 @@ def understand(turn_text: str,
         reply = f"Looking {direction}."
     elif intent == Intent.LOOK_AT:
         referent = extract_referent(turn_text)
-        sighting = (memory.locate(referent, t_now_ms)
-                    if memory is not None and referent else None)
+        sighting, matched = None, referent
+        if memory is not None and referent:
+            sighting, matched = resolve_referent(referent, memory,
+                                                 t_now_ms)
         if sighting is not None:
             mx, my, conf, age = sighting
             bias = object_bias(mx, my, strength=1.2 * conf)
             where = _qualitative(mx * 4.0, my * 4.0)
             if dialogue is not None:
-                dialogue.last_region = referent
-            reply = (f"Looking at the {referent} -- I saw it {where}.")
+                dialogue.last_region = matched
+            reply = (f"Looking at the {matched} -- I saw it {where}.")
         else:
             known = memory.known_objects() if memory is not None else []
             if referent:

@@ -14,6 +14,24 @@ import os
 
 MODEL_ID = os.environ.get("HVP_CLIP_MODEL", "openai/clip-vit-base-patch32")
 
+FOVEAL_CROP_R = 48  # foveal crop half-width, px (matches closed_loop.dump_crops)
+
+
+def foveal_crop_pil(frame, fx, fy):
+    """96x96 foveal crop around (fx, fy) in a 224x224 float32 frame,
+    upscaled 2x, as PIL RGB (grayscale source, CLIP-friendly)."""
+    import numpy as np
+    from PIL import Image
+    h, w = frame.shape
+    x0, x1 = max(0, int(fx) - FOVEAL_CROP_R), min(w, int(fx) + FOVEAL_CROP_R)
+    y0, y1 = max(0, int(fy) - FOVEAL_CROP_R), min(h, int(fy) + FOVEAL_CROP_R)
+    crop = frame[y0:y1, x0:x1]
+    pad = np.zeros((2 * FOVEAL_CROP_R, 2 * FOVEAL_CROP_R), np.float32)
+    pad[:crop.shape[0], :crop.shape[1]] = crop
+    big = np.kron(pad, np.ones((2, 2), np.float32))
+    arr = np.clip(big * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr, mode="L").convert("RGB")
+
 GENERAL_VOCAB = [
     "person", "face", "car", "dog", "cat", "tree", "building",
     "window", "door", "sign", "street light", "table", "chair",
