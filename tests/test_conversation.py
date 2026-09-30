@@ -149,3 +149,53 @@ def test_async_tts_cancel_pending():
     finally:
         gate.set()
         tts.shutdown()
+
+
+class _StubLLM:
+    """Minimal stand-in for an hva.llm backend: canned reply, always on."""
+
+    def __init__(self, reply: str):
+        self._reply = reply
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    def generate(self, payload: dict) -> str:
+        return self._reply
+
+
+def test_llm_look_backstop_steers_from_intent():
+    """If the model drops the LOOK line on a look command, the rule-based
+    intent classifier still steers the shared map. Rules hold the floor."""
+    from hva.understanding import direction_bias
+    import numpy as np
+    pol = ResponsePolicy()
+    pol.llm = _StubLLM("I'm looking at the upper right of the frame.")
+    reply = pol.generate(Turn("Wodehaus, look left.", 1.0))
+    assert reply == "I'm looking at the upper right of the frame."
+    assert pol.pending_bias is not None
+    assert np.array_equal(pol.pending_bias, direction_bias("left"))
+
+
+def test_llm_look_line_still_wins_over_backstop():
+    """An explicit LOOK line from the model takes precedence over the
+    rule-based backstop."""
+    from hva.understanding import direction_bias
+    import numpy as np
+    pol = ResponsePolicy()
+    pol.llm = _StubLLM("Okay, looking over there.\nLOOK: right")
+    reply = pol.generate(Turn("Wodehaus, look left.", 1.0))
+    assert reply == "Okay, looking over there."
+    assert pol.pending_bias is not None
+    assert np.array_equal(pol.pending_bias, direction_bias("right"))
+
+
+def test_llm_no_backstop_without_look_intent():
+    """The backstop only fires on look commands; ordinary replies leave
+    the shared map alone."""
+    pol = ResponsePolicy()
+    pol.llm = _StubLLM("I heard you say hi.")
+    reply = pol.generate(Turn("Wodehaus, say hi.", 1.0))
+    assert reply == "I heard you say hi."
+    assert pol.pending_bias is None

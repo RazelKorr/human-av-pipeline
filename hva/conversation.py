@@ -143,12 +143,18 @@ class ResponsePolicy:
 
     def _generate_llm(self, turn: Turn) -> str:
         from hva.llm import build_payload, split_look_command
-        from hva.understanding import direction_bias
+        from hva.understanding import direction_bias, look_direction
         payload = build_payload(turn.text,
                                 perceptual=self.perceptual,
                                 dialogue=self.dialogue)
         raw = self.llm.generate(payload)
         text, direction = split_look_command(raw)
+        if direction is None:
+            # Deterministic backstop: the rule-based intent classifier is
+            # the floor. If the user gave a look command and the model
+            # dropped the LOOK line, steer from the classified intent
+            # anyway. The model is the ceiling; the rules hold the floor.
+            direction = look_direction(turn.text)
         self.pending_bias = (direction_bias(direction)
                              if direction else None)
         # Keep the dialogue state in sync even on the LLM path.

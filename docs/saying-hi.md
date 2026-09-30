@@ -113,11 +113,14 @@ Latency budget (measured 2026-09-30):
 
 ## Tests
 
-`tests/test_conversation.py`: 9 tests — name variants (including the
+`tests/test_conversation.py`: 12 tests — name variants (including the
 observed "would house" mishearing), turn firing on name+silence, no
 double-fire, unaddressed speech ignored, greeting/question/silence
 policy branches, plus 2 AsyncTTS tests (ticks continue during slow
-synthesis; synthesis failure doesn't kill the loop).
+synthesis; synthesis failure doesn't kill the loop), plus 3 LLM-path
+tests: the LOOK backstop steers from classified intent when the model
+drops the LOOK line, an explicit LOOK line still wins, and ordinary
+replies leave the shared map alone.
 `tests/test_understanding.py`: 10 tests — intent classification,
 direction extraction, bias targeting, perceptual description, dialogue
 history, and the end-to-end language→map→peak proof. All pass.
@@ -146,3 +149,14 @@ Known limits: TTS synthesis runs in a background thread (AsyncTTS) so the
 timing on this VM (no audio device) -- a real player plugs in via play_fn/
 stop_fn hooks. If the user speaks while a response is still synthesizing,
 the stale response is dropped instead of played.
+
+**Phantom turns on long silence (observed 2026-09-30):** Whisper can
+hallucinate speech -- prompt-colored toward the system's name -- on
+several seconds of near-silence, and the turn detector will fire on the
+phantom (name + 1.5 s silence both check out). The reply stays honest
+because it is grounded in the perceptual snapshot, but a phantom look
+command still steers the shared map. This was observed on a synthetic
+file with 6 s of digital zeros; real room tone makes it rarer, but it is
+a known model-level behavior, not a stitching bug (overlapping windows
+dedupe by segment-start key). No heuristic filter yet -- the honest
+grounding keeps the failure benign.
