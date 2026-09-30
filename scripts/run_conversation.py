@@ -53,6 +53,16 @@ def main():
     ap.add_argument("--tx-window", type=float, default=10.0,
                     help="transcription window s (smaller = more responsive)")
     ap.add_argument("--tx-step", type=float, default=3.0)
+    ap.add_argument("--llm", default="none",
+                    choices=["none", "api", "local", "auto"],
+                    help="language-model backend for ResponsePolicy: "
+                         "none=rule-based only, api=Anthropic (needs "
+                         "ANTHROPIC_API_KEY), local=llama-server at --llm-url, "
+                         "auto=local if reachable else api if keyed else none")
+    ap.add_argument("--llm-url", default="http://localhost:8080",
+                    help="base URL for the local llama-server backend")
+    ap.add_argument("--api-model", default="claude-haiku-4-5-20251001",
+                    help="Anthropic model id for --llm api/auto")
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -68,6 +78,39 @@ def main():
     detector = TurnDetector(silence_s=1.5)
     policy = ResponsePolicy()
     policy.perceptual = PerceptualState(loop)
+
+    # --- LLM backend selection (the seam is real now) ---
+    # Rule-based understand() is always the fallback; the backend is the
+    # ceiling. Default is none so a stray ANTHROPIC_API_KEY never spends
+    # money without an explicit flag.
+    def _select_llm():
+        from hva.llm import ApiGenerator, LocalGenerator
+        choice = args.llm
+        if choice == "none":
+            return None, "none (rule-based)"
+        if choice == "local":
+            gen = LocalGenerator(base_url=args.llm_url)
+            return (gen if gen.available else None,
+                    f"local @ {args.llm_url} "
+                    f"({'reachable' if gen.available else 'unreachable, fallback'})")
+        if choice == "api":
+            gen = ApiGenerator(model=args.api_model)
+            return (gen if gen.available else None,
+                    f"api {args.api_model} "
+                    f"({'keyed' if gen.available else 'no key, fallback'})")
+        # auto: local if reachable, else api if keyed, else none
+        local = LocalGenerator(base_url=args.llm_url)
+        if local.available:
+            return local, f"auto -> local @ {args.llm_url}"
+        api = ApiGenerator(model=args.api_model)
+        if api.available:
+            return api, f"auto -> api {args.api_model}"
+        return None, "auto -> none (no local server, no API key)"
+
+    llm_backend, llm_desc = _select_llm()
+    policy.llm = llm_backend
+    print(f"[llm] backend: {llm_desc}", flush=True)
+
     speaker = Speaker()
     vad = EnergyVAD()
     tts = AsyncTTS()

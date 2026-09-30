@@ -188,8 +188,10 @@ def test_llm_fallback_without_key():
     policy.llm = ApiGenerator(api_key=None)
     assert not policy.llm.available
     reply = policy.generate(Turn("Hi Wodehaus", 1.0))
-    assert reply is not None and "Wodehaus" not in reply or True
     assert isinstance(reply, str)
+    assert reply is not None
+    # Rule-based fallback for a greeting (not an LLM reply).
+    assert "Hello" in reply
 
 
 def test_llm_path_with_mock_and_look_bias():
