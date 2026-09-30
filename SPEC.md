@@ -57,6 +57,12 @@ is a center-frequency bin, and it moves two ways:
   and it keeps rhythmic scenes from thrashing attention). The interrupt
   never captures to a phantom: if the transient's band profile is
   all-zero below the hearing floor, there is no target.
+- *Cross-modal (Level 2).* Two couplings, both bidirectional with
+  vision: audio onsets tug saccades toward the panned side (ILD from
+  the stereo mix) with a brief alerting gain; visual transients lower
+  the auditory capture bar -- but only the top quartile of visual
+  transient strength gets a vote (a linear boost let the film's constant
+  wiggling double the capture count; the gate keeps it honest).
 - *The scheduled path (the decision clock).* At most every 200ms -- the
   ears' analog of the ~3Hz saccade clock -- attention reconsiders: the most
   salient band wins, unless it's within 1.5 bins of where we already are.
