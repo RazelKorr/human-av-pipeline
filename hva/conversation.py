@@ -321,6 +321,7 @@ class StreamPlayback:
             except Exception:
                 try:
                     p.kill()
+                    p.wait(timeout=5)  # reap after kill; no zombie until GC
                 except Exception:
                     pass
         # The pump wakes from select within its timeout once the event
@@ -437,10 +438,19 @@ def speak_stream(text: str, player_cmd, outpath: str,
         time.sleep(0.05)
     rc = tts_proc.poll()
     if state["bytes"] == 0 and rc is not None and rc != 0:
+        # Bounded stderr drain: the tts CLI can fork daemon children
+        # that inherit its stderr and outlive it, so an unbounded
+        # read() here could block for a minute on a pipe that will
+        # never see EOF -- stalling the tick loop on a failure path.
+        # One short bounded wait is plenty for an error message.
+        err = ""
         try:
-            err = tts_proc.stderr.read().decode()[:500]
+            r, _, _ = select.select([tts_proc.stderr], [], [], 2.0)
+            if r:
+                err = os.read(tts_proc.stderr.fileno(), 65536).decode(
+                    errors="replace")[:500]
         except Exception:
-            err = ""
+            pass
         handle.stop()
         raise RuntimeError(f"tts --stream failed: {err}")
     return handle
@@ -570,7 +580,8 @@ class Speaker:
         self.stop_fn = stop_fn
         self.player_cmd = _resolve_player_cmd(player_cmd)
         # Explicit play_fn/stop_fn win over the streaming player.
-        self.streaming = self.player_cmd is not None and play_fn is None
+        self.streaming = (self.player_cmd is not None
+                          and play_fn is None and stop_fn is None)
         self.playing_until: float | None = None
         self.current_file: str | None = None
         self.interrupted = False  # True if the last playback was cut short
@@ -622,6 +633,10 @@ class Speaker:
         """True if playback completed naturally (not interrupted)."""
         if self._stream is not None:
             if self._stream.poll() is not None:
+                # Natural finish: run the same deterministic shutdown
+                # as stop() (join pump, close record file, reap tts) so
+                # no fd or zombie waits on garbage collection.
+                self._stream.stop()
                 self._stream = None
                 self.current_file = None
                 return True

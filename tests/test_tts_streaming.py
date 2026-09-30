@@ -118,6 +118,35 @@ def test_tts_failure_raises_runtime_error(monkeypatch, tmp_path):
     assert sp.is_playing(0.0) is False
 
 
+def test_failure_handshake_not_hung_by_lingering_child_stderr(
+        monkeypatch, tmp_path):
+    """The failure handshake drains tts stderr for the error message. A
+    fake tts that forks a daemon child holding stderr open past its own
+    nonzero exit must still surface RuntimeError promptly -- an
+    unbounded stderr.read() would block here until the child exits."""
+    stub = tmp_path / "fake_tts_fail.py"
+    stub.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys, time\n"
+        "sys.stderr.write('boom\\n')\n"
+        "sys.stderr.flush()\n"
+        "pid = os.fork()\n"
+        "if pid == 0:\n"
+        "    time.sleep(30)\n"  # child holds stderr open past parent exit
+        "    os._exit(0)\n"
+        "sys.exit(1)\n"  # parent: nonzero exit, zero stdout bytes
+    )
+    stub.chmod(0o755)
+    monkeypatch.setattr(conv, "TTS_BIN", str(stub))
+    sp = Speaker(player_cmd=_stub_player())
+    t0 = time.time()
+    with pytest.raises(RuntimeError, match="tts --stream failed"):
+        sp.play_stream("hello", str(tmp_path / "reply_04b.mp3"), 0.0)
+    dt = time.time() - t0
+    assert dt < 10, f"failure handshake blocked on stderr: {dt:.1f}s"
+    assert sp.is_playing(0.0) is False
+
+
 def test_stop_not_hung_by_lingering_tts_child(monkeypatch, tmp_path):
     """The tts CLI forks daemon children (fork+setsid) that inherit its
     stdout and can outlive it by ~a minute, so the pump must never wait
