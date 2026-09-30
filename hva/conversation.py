@@ -27,6 +27,8 @@ Design notes:
     is a later policy decision, not a missing feature.
 """
 import subprocess
+import concurrent.futures
+import threading
 
 from hva.understanding import (  # noqa: F401  (re-exported for callers)
     NAME_PATTERNS, _normalize, is_addressed,
@@ -171,6 +173,78 @@ def audio_duration(path: str) -> float:
          "-of", "default=noprint_wrappers=1:nokey=1", path],
         capture_output=True, text=True, timeout=30)
     return float(proc.stdout.strip())
+
+
+class AsyncTTS:
+    """Non-blocking TTS synthesis: keep the perceptual tick loop running.
+
+    speak() blocks the calling thread for seconds while the tts CLI runs.
+    In the live loop that stalls perception -- the 10 Hz tick stops while
+    we synthesize. AsyncTTS moves synthesis to a background thread so the
+    tick loop keeps stepping OnlineLevel3.
+
+    Usage (tick thread only):
+      tts = AsyncTTS()
+      tts.submit("hello there", "/tmp/reply.mp3")  # non-blocking
+      ...
+      for outpath, text in tts.poll_ready():       # call each tick
+          speaker.play(outpath, now_s)
+
+    The worker thread only runs the subprocess; Speaker.play() stays on
+    the tick thread (it just sets timers). poll_ready() re-raises
+    synthesis failures as log lines, not exceptions, so one bad reply
+    never kills the loop.
+    """
+
+    def __init__(self, max_workers: int = 1, speak_fn=None):
+        self._ex = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers)
+        self._speak_fn = speak_fn or speak
+        self._lock = threading.Lock()
+        self._pending: dict = {}  # future -> (outpath, text)
+
+    def submit(self, text: str, outpath: str, voice: str = "avocado_v2:MAI_03"):
+        """Queue synthesis. Returns the Future (rarely needed)."""
+        fut = self._ex.submit(self._speak_fn, text, outpath, voice)
+        with self._lock:
+            self._pending[fut] = (outpath, text)
+        return fut
+
+    def poll_ready(self):
+        """Collect finished syntheses. Call from the tick thread."""
+        with self._lock:
+            items = list(self._pending.items())
+        ready: list[tuple[str, str]] = []
+        done: list = []
+        for fut, (outpath, text) in items:
+            if fut.done():
+                done.append(fut)
+                try:
+                    fut.result()
+                    ready.append((outpath, text))
+                except Exception as e:  # one bad reply never kills the loop
+                    print(f"[async-tts] synthesis failed: {e}", flush=True)
+        with self._lock:
+            for fut in done:
+                self._pending.pop(fut, None)
+        return ready
+
+    def has_pending(self) -> bool:
+        with self._lock:
+            return bool(self._pending)
+
+    def cancel_pending(self):
+        """Drop queued (not yet running) syntheses. Returns count dropped."""
+        dropped = 0
+        with self._lock:
+            for fut in list(self._pending):
+                if fut.cancel():
+                    self._pending.pop(fut, None)
+                    dropped += 1
+        return dropped
+
+    def shutdown(self):
+        self._ex.shutdown(wait=False)
 
 
 class Speaker:

@@ -8,7 +8,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from hva.conversation import (  # noqa: E402
-    TurnDetector, ResponsePolicy, Turn, is_addressed,
+    TurnDetector, ResponsePolicy, Turn, is_addressed, AsyncTTS,
 )
 
 
@@ -64,3 +64,58 @@ def test_response_policy_question_is_honest():
 def test_response_policy_silent_when_not_addressed():
     pol = ResponsePolicy()
     assert pol.generate(Turn("hello there", 1.0)) is None
+
+
+def test_async_tts_keeps_tick_loop_running():
+    """The tick loop must not stall while TTS synthesizes.
+
+    A slow mock speak (0.4 s) runs in the background while we simulate
+    10 Hz ticks. We should complete many ticks before the synthesis
+    finishes, then collect it via poll_ready().
+    """
+    import time
+
+    def slow_speak(text, outpath, voice="v"):
+        time.sleep(0.4)
+        with open(outpath, "w") as f:
+            f.write(text)
+        return outpath
+
+    tts = AsyncTTS(speak_fn=slow_speak)
+    try:
+        out = "/tmp/async_tts_test.txt"
+        tts.submit("hello", out)
+        ticks = 0
+        ready = []
+        t0 = time.time()
+        # Simulate 10 Hz ticks for up to 2 s.
+        while time.time() - t0 < 2.0:
+            ready += tts.poll_ready()
+            ticks += 1
+            time.sleep(0.05)  # 20 Hz test loop (faster than 10 Hz ticks)
+            if ready:
+                break
+        # We kept ticking while synthesis ran: at least 4 ticks in 0.4 s
+        # at 20 Hz, and we eventually got the result.
+        assert ticks >= 4, f"tick loop stalled: only {ticks} ticks"
+        assert len(ready) == 1
+        assert ready[0][0] == out
+        assert not tts.has_pending()
+    finally:
+        tts.shutdown()
+
+
+def test_async_tts_failure_does_not_kill_loop():
+    def bad_speak(text, outpath, voice="v"):
+        raise RuntimeError("boom")
+
+    tts = AsyncTTS(speak_fn=bad_speak)
+    try:
+        tts.submit("hi", "/tmp/async_tts_bad.mp3")
+        import time
+        time.sleep(0.2)
+        # Should log the failure and return [], not raise.
+        assert tts.poll_ready() == []
+        assert not tts.has_pending()
+    finally:
+        tts.shutdown()

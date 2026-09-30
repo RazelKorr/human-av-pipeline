@@ -127,6 +127,8 @@ speaking -> interruption ("Wodehaus stop talking, never mind.") at 4.0 s
 -> **BARGE-IN at 4.3 s**, playback stopped -> interruption transcribed as
 a new turn at 7.3 s -> new response. Log: 2 turns, 1 barge-in.
 
-Known v1 limits: TTS blocks the tick loop; the Speaker simulates playback
+Known limits: TTS synthesis runs in a background thread (AsyncTTS) so the
+10 Hz tick loop never stalls; the Speaker simulates playback
 timing on this VM (no audio device) -- a real player plugs in via play_fn/
-stop_fn hooks. The LLM seam (ResponsePolicy.generate) is still open.
+stop_fn hooks. If the user speaks while a response is still synthesizing,
+the stale response is dropped instead of played.

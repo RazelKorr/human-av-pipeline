@@ -18,8 +18,8 @@ Usage:
   python scripts/run_conversation.py --src rtmp://host/live/key --realtime
 
 This is file/URL-as-live. A real call swaps --src for the virtual
-audio cable (see docs/saying-hi.md). TTS synthesis blocks the tick
-loop in v1 -- noted as a limitation, not hidden.
+audio cable (see docs/saying-hi.md). TTS synthesis runs in a background
+thread (AsyncTTS) so the 10 Hz tick loop never stalls while speaking.
 """
 import os
 import sys
@@ -37,7 +37,7 @@ from hvm.online import OnlineLevel3
 from hva.stream import (StreamSource, VisionFrontEnd, AudioFrontEnd,
                         RollingTranscriber)
 from hva.conversation import (TurnDetector, ResponsePolicy, Speaker,
-                              EnergyVAD, speak)
+                              EnergyVAD, AsyncTTS)
 from hva.understanding import PerceptualState
 
 
@@ -70,10 +70,13 @@ def main():
     policy.perceptual = PerceptualState(loop)
     speaker = Speaker()
     vad = EnergyVAD()
+    tts = AsyncTTS()
 
     n_mom = 0
     n_turns = 0
     n_barges = 0
+    n_dropped = 0
+    drop_stale = False  # user spoke while TTS was synthesizing
     log = []
 
     def note(msg):
@@ -82,52 +85,72 @@ def main():
         log.append(line)
 
     vis_queue = []
-    for tick in source:
-        vis_queue.append(vision_fe.push(tick.frame))
-        for am in audio_fe.push(tick):
-            t_ms = n_mom * 100.0
-            now_s = t_ms / 1000.0
-            vis = vis_queue.pop(0)
-            aud = (am["Tprof_n"], am["pan"])
-            mono = am["mono"]
-            tx.push(t_ms, mono)
-            sp = tx.speech_tick(t_ms)
+    try:
+        for tick in source:
+            vis_queue.append(vision_fe.push(tick.frame))
+            for am in audio_fe.push(tick):
+                t_ms = n_mom * 100.0
+                now_s = t_ms / 1000.0
+                vis = vis_queue.pop(0)
+                aud = (am["Tprof_n"], am["pan"])
+                mono = am["mono"]
+                tx.push(t_ms, mono)
+                sp = tx.speech_tick(t_ms)
 
-            # --- barge-in: fast VAD on the raw mic, checked BEFORE the
-            # --- turn detector (the transcript lags seconds behind).
-            if speaker.is_playing(now_s) and vad.update(mono):
-                speaker.stop()
-                n_barges += 1
-                note("BARGE-IN: user speech during playback -- "
-                     "stopped response, listening")
+                # --- barge-in: fast VAD on the raw mic, checked BEFORE the
+                # --- turn detector (the transcript lags seconds behind).
+                # --- VAD runs every tick now (not just during playback) so
+                # --- we can also drop a response that is still synthesizing
+                # --- when the user starts talking.
+                onset = vad.update(mono)
+                if onset and speaker.is_playing(now_s):
+                    speaker.stop()
+                    n_barges += 1
+                    note("BARGE-IN: user speech during playback -- "
+                         "stopped response, listening")
+                elif onset and tts.has_pending():
+                    drop_stale = True
+                    note("user spoke during TTS synthesis -- "
+                         "will drop stale response")
 
-            # --- perception tick (with any language bias from last turn)
-            loop.tick(t_ms, vis, aud, sp, task_bias=policy.take_bias())
+                # --- perception tick (with any language bias from last turn)
+                # --- This never blocks on TTS: synthesis lives in AsyncTTS.
+                loop.tick(t_ms, vis, aud, sp, task_bias=policy.take_bias())
 
-            # --- turn detection on transcribed-so-far words
-            for turn in detector.update(tx.transcript(), now_s):
-                n_turns += 1
-                note(f"TURN: {turn.text!r}")
-                t0 = time.time()
-                reply = policy.generate(turn)
-                if reply is None:
-                    continue
-                note(f"REPLY ({time.time() - t0:.1f}s to generate): "
-                     f"{reply!r}")
-                out = os.path.join(args.outdir, f"reply_{n_turns:02d}.mp3")
-                t0 = time.time()
-                speak(reply, out)  # v1: blocks the tick loop
-                note(f"TTS ({time.time() - t0:.1f}s) -> {out}")
-                speaker.play(out, now_s)
-                note("SPEAKING...")
+                # --- collect finished syntheses and start playback
+                for outpath, _text in tts.poll_ready():
+                    if drop_stale:
+                        drop_stale = False
+                        n_dropped += 1
+                        note(f"dropped stale response ({outpath}) -- "
+                             "user spoke during synthesis")
+                        continue
+                    speaker.play(outpath, now_s)
+                    note(f"SPEAKING... ({outpath})")
 
-            if speaker.check_finished(now_s):
-                note("done speaking -- listening")
+                # --- turn detection on transcribed-so-far words
+                for turn in detector.update(tx.transcript(), now_s):
+                    n_turns += 1
+                    note(f"TURN: {turn.text!r}")
+                    t0 = time.time()
+                    reply = policy.generate(turn)
+                    if reply is None:
+                        continue
+                    note(f"REPLY ({time.time() - t0:.1f}s to generate): "
+                         f"{reply!r}")
+                    out = os.path.join(args.outdir, f"reply_{n_turns:02d}.mp3")
+                    tts.submit(reply, out)  # non-blocking: tick loop continues
+                    note(f"TTS queued -> {out}")
 
-            n_mom += 1
+                if speaker.check_finished(now_s):
+                    note("done speaking -- listening")
+
+                n_mom += 1
+    finally:
+        tts.shutdown()
 
     note(f"stream ended: {n_mom} moments, {n_turns} turns, "
-         f"{n_barges} barge-ins")
+         f"{n_barges} barge-ins, {n_dropped} dropped (stale synthesis)")
     with open(os.path.join(args.outdir, "conversation.log"), "w") as f:
         f.write("\n".join(log) + "\n")
 
