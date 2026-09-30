@@ -351,6 +351,12 @@ class ObjectMemory:
         cands.sort(key=lambda tr: (tr.hits, tr.last_t), reverse=True)
         return cands
 
+    def all_live_tracks(self, t_now: float) -> list[Track]:
+        """Every live track regardless of label, best first."""
+        cands = self._live_tracks(t_now)
+        cands.sort(key=lambda tr: (tr.hits, tr.last_t), reverse=True)
+        return cands
+
     def last_seen(self, name: str):
         """Most recent sighting regardless of age: (map_x, map_y, conf)."""
         want = _normalize_name(name)
@@ -419,37 +425,102 @@ def split_spatial(candidate: str
     return None, candidate
 
 
+def _pick_by_spatial(tracks: list, spatial: str,
+                     gaze_xy: tuple[float, float] | None = None):
+    """One track from a list by a spatial selector. None when empty.
+
+    Map coords: x 0=left 56=right, y 0=top 56=bottom. 'nearest' is
+    measured from the current gaze (frame center when unknown).
+    """
+    if not tracks:
+        return None
+    gx, gy = gaze_xy if gaze_xy is not None else (28.0, 28.0)
+    if spatial in ("leftmost", "left"):
+        return min(tracks, key=lambda tr: tr.x)
+    if spatial in ("rightmost", "right"):
+        return max(tracks, key=lambda tr: tr.x)
+    if spatial in ("topmost", "uppermost", "top", "upper"):
+        return min(tracks, key=lambda tr: tr.y)
+    if spatial in ("bottommost", "lowermost", "bottom", "lower"):
+        return max(tracks, key=lambda tr: tr.y)
+    if spatial in ("nearest", "closest"):
+        return min(tracks,
+                   key=lambda tr: (tr.x - gx) ** 2 + (tr.y - gy) ** 2)
+    if spatial in ("farthest", "furthest"):
+        return max(tracks,
+                   key=lambda tr: (tr.x - gx) ** 2 + (tr.y - gy) ** 2)
+    return min(tracks,  # "middle" / "center"
+               key=lambda tr: (tr.x - 28.0) ** 2 + (tr.y - 28.0) ** 2)
+
+
 def resolve_spatial_referent(name: str, spatial: str,
                              memory: "ObjectMemory", t_now: float,
                              gaze_xy: tuple[float, float] | None = None):
     """Pick one track of `name` by a spatial selector.
 
-    Map coords: x 0=left 56=right, y 0=top 56=bottom. 'nearest' is
-    measured from the current gaze (frame center when unknown).
     Returns (track, matched_name); (None, name) when nothing matches.
     """
-    tracks = memory.locate_all(name, t_now)
-    if not tracks:
-        return None, name
-    gx, gy = gaze_xy if gaze_xy is not None else (28.0, 28.0)
-    if spatial in ("leftmost", "left"):
-        pick = min(tracks, key=lambda tr: tr.x)
-    elif spatial in ("rightmost", "right"):
-        pick = max(tracks, key=lambda tr: tr.x)
-    elif spatial in ("topmost", "uppermost", "top", "upper"):
-        pick = min(tracks, key=lambda tr: tr.y)
-    elif spatial in ("bottommost", "lowermost", "bottom", "lower"):
-        pick = max(tracks, key=lambda tr: tr.y)
-    elif spatial in ("nearest", "closest"):
-        pick = min(tracks,
-                   key=lambda tr: (tr.x - gx) ** 2 + (tr.y - gy) ** 2)
-    elif spatial in ("farthest", "furthest"):
-        pick = max(tracks,
-                   key=lambda tr: (tr.x - gx) ** 2 + (tr.y - gy) ** 2)
-    else:  # "middle" / "center"
-        pick = min(tracks,
-                   key=lambda tr: (tr.x - 28.0) ** 2 + (tr.y - 28.0) ** 2)
-    return pick, name
+    track = _pick_by_spatial(memory.locate_all(name, t_now), spatial,
+                             gaze_xy)
+    return (track, name) if track is not None else (None, name)
+
+
+_ONE_CANONICAL = {"left": "leftmost", "right": "rightmost",
+                  "top": "topmost", "upper": "uppermost",
+                  "bottom": "bottommost", "lower": "lowermost"}
+
+
+def resolve_one_track(spatial: str, memory: "ObjectMemory",
+                      t_now: float, label: str | None,
+                      gaze_xy: tuple[float, float] | None = None):
+    """'the left one': pick among the last-referenced label's tracks,
+    or among every live track when no label is in play. Spatial
+    queries are relative among known tracks, so the detector is
+    never consulted here."""
+    if label:
+        tracks = memory.locate_all(label, t_now)
+    else:
+        tracks = memory.all_live_tracks(t_now)
+    return _pick_by_spatial(tracks, spatial, gaze_xy)
+
+
+_PRONOUNS = ("it", "that", "this", "there")
+_DIRECTIONS = ("left", "right", "up", "down")
+
+
+def split_anaphor(referent: str) -> tuple[str | None, str | None]:
+    """Split anaphoric forms off a referent.
+
+    'it' / 'it again' -> ('pronoun', None); 'that gate' ->
+    ('det', 'gate'); 'the left one' -> ('one', 'left').
+    Returns (None, None) for ordinary referents.
+    """
+    words = _normalize(referent).split()
+    if not words:
+        return None, None
+    if words[0] in _PRONOUNS:
+        if len(words) == 1 or words[1:] == ["again"]:
+            return "pronoun", None
+        if words[0] in ("that", "this"):
+            # determiner + noun: 'that gate' -> 'gate'
+            return "det", " ".join(words[1:])
+        return None, None
+    rest = words[1:] if words[0] == "the" else words
+    if (len(rest) == 2 and rest[1] == "one"
+            and rest[0] in _ONE_CANONICAL):
+        return "one", rest[0]
+    return None, None
+
+
+def base_label(label: str | None) -> str | None:
+    """Strip a spatial selector and direction words off a stored
+    region name: 'leftmost windows' -> 'windows'; 'left' -> None."""
+    if not label:
+        return None
+    if _normalize(label) in _DIRECTIONS:
+        return None
+    spatial, name = split_spatial(label)
+    return name if spatial else label
 
 
 def resolve_referent(candidate: str, memory: "ObjectMemory",
@@ -543,33 +614,65 @@ def understand(turn_text: str,
         referent = extract_referent(turn_text)
         sighting, matched = None, referent
         spatial_word = None
-        if memory is not None and referent:
-            spatial_word, name = split_spatial(referent)
-            if spatial_word:
-                track, matched = resolve_spatial_referent(
-                    name, spatial_word, memory, t_now_ms, gaze_xy)
+        anaphor, detail, store_region = None, None, None
+        if referent:
+            # Anaphora resolves against the dialogue state before the
+            # ordinary memory path: 'it'/'that' -> last region,
+            # 'that gate' -> 'gate', 'the left one' -> spatial pick.
+            anaphor, detail = split_anaphor(referent)
+            if anaphor == "det":
+                referent, matched = detail, detail
+                anaphor = None
+            elif anaphor == "pronoun":
+                last = dialogue.last_region if dialogue else None
+                if last and _normalize(last) in _DIRECTIONS:
+                    last = None  # 'look left' leaves no object to mean
+                if last:
+                    # verbatim: 'leftmost windows' re-enters the
+                    # spatial path and lands on the same track
+                    referent, matched = last, last
+                    anaphor = None
+        if memory is not None and referent and anaphor != "pronoun":
+            if anaphor == "one":
+                label = base_label(
+                    dialogue.last_region if dialogue else None)
+                track = resolve_one_track(detail, memory, t_now_ms,
+                                          label, gaze_xy)
                 if track is not None:
                     sighting = (track.x, track.y, track.conf,
                                 track.age(t_now_ms))
-                    matched = ((spatial_word + " " + matched).strip()
-                               or matched)
+                    matched = f"{detail} {track.label}"
+                    # canonical form so a later 'it' re-resolves here
+                    store_region = (f"{_ONE_CANONICAL[detail]} "
+                                    f"{track.label}")
             else:
-                sighting, matched = resolve_referent(referent, memory,
-                                                     t_now_ms)
+                spatial_word, name = split_spatial(referent)
+                if spatial_word:
+                    track, matched = resolve_spatial_referent(
+                        name, spatial_word, memory, t_now_ms, gaze_xy)
+                    if track is not None:
+                        sighting = (track.x, track.y, track.conf,
+                                    track.age(t_now_ms))
+                        matched = ((spatial_word + " " + matched).strip()
+                                   or matched)
+                else:
+                    sighting, matched = resolve_referent(referent, memory,
+                                                         t_now_ms)
         if sighting is not None:
             mx, my, conf, age = sighting
             bias = object_bias(mx, my, strength=1.2 * conf)
             where = _qualitative(mx * 4.0, my * 4.0)
             if dialogue is not None:
-                dialogue.last_region = matched
+                dialogue.last_region = store_region or matched
             reply = (f"Looking at the {matched} -- I saw it {where}.")
         else:
             # Last resort: scan the current frame for something never
-            # fixated. Only when not a spatial query (those are relative
-            # among known tracks) and a detector hook is provided.
+            # fixated. Only when not a spatial/anaphoric query (those
+            # are relative among known tracks) and a detector hook is
+            # provided.
             found = None
-            if (detect_fn is not None and referent
-                    and not spatial_word and memory is not None):
+            if (detect_fn is not None and referent and not spatial_word
+                    and anaphor is None and memory is not None):
                 try:
                     dets = detect_fn([referent])
                 except Exception:
@@ -585,6 +688,9 @@ def understand(turn_text: str,
                 if dialogue is not None:
                     dialogue.last_region = label
                 reply = (f"Found the {referent} -- looking at it {where}.")
+            elif anaphor == "pronoun":
+                reply = ("I don't know what 'it' refers to yet -- "
+                         "I haven't locked onto anything.")
             else:
                 known = (memory.known_objects()
                          if memory is not None else [])

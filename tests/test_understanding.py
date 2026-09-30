@@ -784,3 +784,72 @@ def test_find_and_where_is_intent():
     assert classify("wodehaus where is the gate") == Intent.LOOK_AT
     assert extract_referent("wodehaus find the gate") == "gate"
     assert extract_referent("wodehaus where is the gate") == "gate"
+
+
+def _anaphor_mem():
+    from hva.understanding import ObjectMemory
+    mem = ObjectMemory()
+    mem.add("windows", 10.0, 20.0, 1000.0, 0.8)
+    mem.add("windows", 11.0, 21.0, 2000.0, 0.8)
+    mem.add("windows", 40.0, 20.0, 1500.0, 0.7)
+    mem.add("gate", 28.0, 30.0, 1000.0, 0.9)
+    return mem
+
+
+def test_pronoun_repeats_last_region():
+    from hva.understanding import DialogueState, understand
+    mem, d = _anaphor_mem(), DialogueState()
+    r1, b1 = understand("wodehaus look at the windows", memory=mem,
+                        t_now_ms=5000.0, dialogue=d)
+    r2, b2 = understand("wodehaus look at it again", memory=mem,
+                        t_now_ms=6000.0, dialogue=d)
+    assert b2 is not None and int(b1.argmax()) == int(b2.argmax())
+    assert "windows" in r2
+
+
+def test_pronoun_chains_off_spatial_pick():
+    from hva.understanding import DialogueState, understand
+    mem, d = _anaphor_mem(), DialogueState()
+    understand("wodehaus look at the right one", memory=mem,
+               t_now_ms=8000.0, dialogue=d)
+    r, b = understand("wodehaus look at it", memory=mem,
+                      t_now_ms=9000.0, dialogue=d)
+    assert b is not None
+    assert divmod(int(b.argmax()), 56)[1] == 40
+    assert "rightmost windows" in r
+
+
+def test_pronoun_with_no_referent_is_honest():
+    from hva.understanding import DialogueState, understand
+    mem, d = _anaphor_mem(), DialogueState()
+    r, b = understand("wodehaus look at it", memory=mem,
+                      t_now_ms=5000.0, dialogue=d)
+    assert b is None and "'it' refers to" in r
+
+
+def test_the_left_one_picks_among_last_label():
+    from hva.understanding import DialogueState, understand
+    mem, d = _anaphor_mem(), DialogueState()
+    understand("wodehaus look at the windows", memory=mem,
+               t_now_ms=5000.0, dialogue=d)
+    r, b = understand("wodehaus look at the left one", memory=mem,
+                      t_now_ms=6000.0, dialogue=d)
+    assert b is not None
+    assert divmod(int(b.argmax()), 56)[1] == 10
+    assert "left windows" in r
+
+
+def test_the_one_with_empty_memory_is_honest():
+    from hva.understanding import DialogueState, ObjectMemory, understand
+    d = DialogueState()
+    r, b = understand("wodehaus look at the left one",
+                      memory=ObjectMemory(), t_now_ms=5000.0, dialogue=d)
+    assert b is None and "left one" in r
+
+
+def test_determiner_that_gate():
+    from hva.understanding import DialogueState, understand
+    mem, d = _anaphor_mem(), DialogueState()
+    r, b = understand("wodehaus look at that gate", memory=mem,
+                      t_now_ms=5000.0, dialogue=d)
+    assert b is not None and "Looking at the gate" in r
