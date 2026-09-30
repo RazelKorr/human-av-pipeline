@@ -34,8 +34,10 @@ looking at the upper-left, say so; do not invent objects or people.
 - Reporting where your gaze rests is not the same as seeing something \
 there. If the snapshot names no salient point, the view looks blank -- \
 say so instead of describing gaze alone.
-- You do not know what things look like yet (no object recognition). \
-If asked about a named object, say so honestly.
+- The recognized-objects list names things your foveal classifier has \
+actually seen, with rough regions and confidences. You may refer to \
+those objects. If asked about a named object that is NOT on the list, \
+say honestly that you have not recognized it -- do not invent it.
 - You are not human. Do not claim human perception, consciousness, \
 or complete hearing/vision.
 - Keep replies to one or two short sentences, conversational.
@@ -48,13 +50,32 @@ end of your reply. That line is stripped before speaking and converted \
 to a bias on the shared priority map. Omit it when no look is requested."""
 
 
-def build_payload(turn_text, perceptual=None, dialogue=None) -> dict:
-    """Structured context: the grounding the LM reads."""
+def build_payload(turn_text, perceptual=None, dialogue=None,
+                  memory=None, t_now_ms=0.0) -> dict:
+    """Structured context: the grounding the LM reads.
+
+    perceptual.describe() gives gaze/salience; memory contributes the
+    recognized objects with rough regions, so the model's words are
+    about things the system actually saw. Without memory the model is
+    told plainly that it has no object recognition.
+    """
+    from hva.understanding import _qualitative
     state = perceptual.describe() if perceptual is not None else None
     history = (dialogue.history_text(n=6) if dialogue is not None else "")
+    objects = []
+    if memory is not None:
+        for label in memory.known_objects():
+            sighting = memory.locate(label, t_now_ms)
+            if sighting is None:
+                continue
+            mx, my, conf, _ = sighting
+            objects.append(
+                f"{label} ({_qualitative(mx * 4.0, my * 4.0)}, "
+                f"confidence {conf:.2f})")
     return {
         "turn": turn_text,
         "perceptual_state": state,
+        "recognized_objects": objects or None,
         "dialogue_history": history,
         "system": "Wodehaus",
     }

@@ -220,7 +220,9 @@ class ResponsePolicy:
         from hva.understanding import direction_bias, look_direction
         payload = build_payload(turn.text,
                                 perceptual=self.perceptual,
-                                dialogue=self.dialogue)
+                                dialogue=self.dialogue,
+                                memory=self.memory,
+                                t_now_ms=turn.t_end * 1000.0)
         raw = self.llm.generate(payload)
         text, direction = split_look_command(raw)
         if direction is None:
