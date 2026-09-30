@@ -41,6 +41,16 @@ fusion, wagon-wheel reversal, saccadic suppression, change blindness --
   background wiggling doesn't get a vote).
 - **Level 3**: joint priority map (planned).
 
+**`scripts/watch.py`** ties all three together: feed it a video and it
+watches it the way a human would -- vision pipeline on the frames,
+audio pipeline on the soundtrack, L1 fusion on one timeline -- then
+writes a plain-language perceptual review in a fraction of the clip's
+runtime. Sixty-two seconds of video, reviewed in seventeen. The
+bottlenecks (10 Hz moments, a fovea, an attentional blink) are the
+point: it reports what a human would have perceived, which is less
+than what's there, and that's what makes the review human-shaped.
+**`scripts/perceive.py`** does the same for still images.
+
 ## Running it
 
 ```bash
