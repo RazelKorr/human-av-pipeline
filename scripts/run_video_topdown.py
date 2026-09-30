@@ -1,9 +1,9 @@
 """Top-down attention demo: recognition contextualizes the next saccades.
 
-Pass 1 (bottom-up only) produced fixations; the cortex (a human reader)
-labeled 12 foveal crops (output/foveal_labels.json). This script re-runs
-the driver, and when the eyes land near a labeled location, the label's
-meaning re-biases the NEXT saccades -- the dark-street-sign loop:
+Pass 1 (bottom-up only) produced fixations; originally a human reader
+(the "cortex") labeled 12 foveal crops. Now the loop classifies the
+foveal crop live with CLIP (hvp/recognize.py); --recognizer manual
+reproduces the old hand-labeled behavior for comparison.
 
   brightness captures -> fovea identifies -> identity sets the search.
 
@@ -17,8 +17,9 @@ Label -> computable bias (all on the 56x56 salience map):
   lit-floor   -> look_up:         brightness above the POI
   windows     -> follow_row
 
-Context becomes available 150 ms after landing (recognition latency),
-decays over ~2.5 s -- it contextualizes the next several saccades.
+Context becomes available after recognition (live: classified once per
+fixation, ~310 ms on CPU) and decays over ~2.5 s -- it contextualizes
+the next several saccades.
 """
 
 import json
@@ -35,10 +36,12 @@ sys.path.insert(0, HERE)
 import run_video
 from hvp import attention as A
 from hvp import baseline as B
+from hvp.recognize import DARK_STREET_VOCAB, FovealClassifier
 from hvp.saccades import SaccadeController
 
 OUT = os.path.join(ROOT, "output")
 VSIZE = 224
+CROP_R = 48  # foveal crop half-width, px (matches closed_loop.dump_crops)
 
 
 def _bias(label, small, px, py):
@@ -63,7 +66,67 @@ def _bias(label, small, px, py):
     return np.zeros(S, np.float32), "none"
 
 
-def drive(frames, fps, labels, use_topdown):
+def foveal_crop_pil(frame, fx, fy):
+    """96x96 foveal crop around (fx, fy), upscaled 2x, as PIL RGB."""
+    from PIL import Image
+    h, w = frame.shape
+    x0, x1 = max(0, int(fx) - CROP_R), min(w, int(fx) + CROP_R)
+    y0, y1 = max(0, int(fy) - CROP_R), min(h, int(fy) + CROP_R)
+    crop = frame[y0:y1, x0:x1]
+    pad = np.zeros((2 * CROP_R, 2 * CROP_R), np.float32)
+    pad[:crop.shape[0], :crop.shape[1]] = crop
+    big = np.kron(pad, np.ones((2, 2), np.float32))
+    arr = np.clip(big * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr, mode="L").convert("RGB")
+
+
+def manual_recognizer(labels, dva):
+    """Adapter reproducing the hand-labeled behavior.
+
+    recognize(t, fx, fy, frame) -> (label, conf, lx, ly, age) | None.
+    Fires when the eyes are within 5 deg of a labeled location, 150 ms
+    to 4 s after the label's timestamp.
+    """
+    def recognize(t, fx, fy, frame):
+        best = None
+        for L in labels:
+            d = np.hypot(fx - L["x"], fy - L["y"]) * dva
+            age = t - L["t"]
+            if d < 5.0 and 150.0 < age < 4000.0:
+                if best is None or age < best[0]:
+                    best = (age, L)
+        if best is None:
+            return None
+        age, L = best
+        return L["label"], 1.0, L["x"], L["y"], age
+    return recognize
+
+
+def live_recognizer(classifier, vocab, threshold=0.30, move_deg=2.0, dva=None):
+    """Adapter classifying the foveal crop at each new fixation.
+
+    Classifies once per fixation (reuses the label while the eyes stay
+    within move_deg); returns None below threshold ("unknown" is honest).
+    """
+    vocab_pairs = [(name, prompt) for name, prompt in vocab.items()]
+    state = {"x": None, "y": None, "t": None,
+             "label": None, "conf": 0.0}
+
+    def recognize(t, fx, fy, frame):
+        st = state
+        moved = (st["x"] is None or
+                 np.hypot(fx - st["x"], fy - st["y"]) * dva > move_deg)
+        if moved:
+            crop = foveal_crop_pil(frame, fx, fy)
+            label, conf = classifier.classify(crop, vocab_pairs)
+            st.update(x=fx, y=fy, t=t, label=label, conf=conf)
+        if st["conf"] < threshold:
+            return None
+        return st["label"], st["conf"], st["x"], st["y"], t - st["t"]
+    return recognize
+
+
+def drive(frames, fps, recognize, use_topdown):
     dt = 1000.0 / fps
     dva = B.FIELD_WIDTH_DEG / VSIZE
     t_end = frames[-1][0]
@@ -74,7 +137,7 @@ def drive(frames, fps, labels, use_topdown):
     decay = np.exp(-dt / A.TRANS_TAU_MS)
     next_decision = 100.0
     scanpath = [(0.0, VSIZE / 2, VSIZE / 2)]
-    events = []  # (t, label, what) when a context fires
+    events = []  # (t, label, conf, what) when a context fires
 
     for t, f in frames:
         small = A._downsample(f)
@@ -96,19 +159,14 @@ def drive(frames, fps, labels, use_topdown):
             # --- top-down: recognition contextualizes the next saccades ---
             if use_topdown:
                 fx, fy, _ = c.state_at(t)
-                best = None
-                for L in labels:
-                    d = np.hypot(fx - L["x"], fy - L["y"]) * dva
-                    age = t - L["t"]
-                    if d < 5.0 and 150.0 < age < 4000.0:
-                        if best is None or age < best[0]:
-                            best = (age, L)
-                if best is not None:
-                    age, L = best
-                    bmap, what = _bias(L["label"], small,
-                                       L["x"] / A.SCALE, L["y"] / A.SCALE)
-                    sal = sal + bmap * np.exp(-age / 1500.0)
-                    events.append((t, L["label"], what))
+                rec = recognize(t, fx, fy, f)
+                if rec is not None:
+                    label, conf, lx, ly, age = rec
+                    if age < 4000.0:
+                        bmap, what = _bias(label, small,
+                                           lx / A.SCALE, ly / A.SCALE)
+                        sal = sal + conf * bmap * np.exp(-age / 1500.0)
+                        events.append((t, label, conf, what))
             iy, ix = np.unravel_index(int(np.argmax(sal)), sal.shape)
             t_on = t + B.SACCADE_LATENCY_MS
             if t_on < t_end:
@@ -124,31 +182,55 @@ def drive(frames, fps, labels, use_topdown):
     return scanpath, events
 
 
+def find_labels():
+    """foveal_labels.json: local output first, then the vision repo."""
+    for p in (os.path.join(OUT, "foveal_labels.json"),
+              os.path.expanduser("~/workspace/human-vision-pipeline/"
+                                  "output/foveal_labels.json")):
+        if os.path.exists(p):
+            return p
+    raise SystemExit("foveal_labels.json not found "
+                     "(needed for --recognizer manual)")
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
     ap.add_argument("--seconds", type=float, default=30.0)
+    ap.add_argument("--recognizer", choices=["live", "manual"],
+                    default="live",
+                    help="live: CLIP classifies each foveal crop; "
+                         "manual: the 12 hand labels (comparison)")
     args = ap.parse_args()
 
     meta = run_video.probe(args.video)
     frames = [(t, f) for t, f in
               run_video.decode_gray(args.video, args.seconds,
                                     meta["fps"], VSIZE, VSIZE)]
-    labels = json.load(open(os.path.join(OUT, "foveal_labels.json")))
-    print(f"{len(frames)} frames, {len(labels)} labeled fixations", flush=True)
+    dva = B.FIELD_WIDTH_DEG / VSIZE
+    if args.recognizer == "manual":
+        labels = json.load(open(find_labels()))
+        recognize = manual_recognizer(labels, dva)
+        print(f"{len(frames)} frames, {len(labels)} labeled fixations",
+              flush=True)
+    else:
+        recognize = live_recognizer(FovealClassifier(), DARK_STREET_VOCAB,
+                                    dva=dva)
+        print(f"{len(frames)} frames, live CLIP recognizer", flush=True)
 
-    sp_bottom, _ = drive(frames, meta["fps"], labels, use_topdown=False)
-    sp_top, events = drive(frames, meta["fps"], labels, use_topdown=True)
+    sp_bottom, _ = drive(frames, meta["fps"], recognize, use_topdown=False)
+    sp_top, events = drive(frames, meta["fps"], recognize, use_topdown=True)
     print(f"bottom-up: {len(sp_bottom)} fixations, "
           f"top-down: {len(sp_top)} fixations", flush=True)
     print(f"context fired {len(events)} times:", flush=True)
     seen = set()
-    for t, lbl, what in events:
+    for t, lbl, conf, what in events:
         key = (lbl, what)
         if key not in seen:
             seen.add(key)
-            print(f"  t={t:.0f}ms: '{lbl}' -> {what}", flush=True)
+            print(f"  t={t:.0f}ms: '{lbl}' (conf {conf:.2f}) -> {what}",
+                  flush=True)
 
     # divergence: fraction of top-down fixations >5 deg from any
     # bottom-up fixation near the same time
