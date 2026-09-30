@@ -35,9 +35,14 @@ Design notes:
   - Barge-in is an EnergyVAD gate on the tick loop: speech energy above
     the adaptive floor during playback/synthesis marks the turn stale.
 """
+import os
+import select
+import shlex
+import shutil
 import subprocess
 import concurrent.futures
 import threading
+import time
 
 from hva.understanding import (  # noqa: F401  (re-exported for callers)
     NAME_PATTERNS, _normalize, is_addressed,
@@ -244,17 +249,201 @@ class ResponsePolicy:
         return b
 
 
+TTS_BIN = "/opt/hatch/bin/tts"
+
+
 def speak(text: str, outpath: str,
           voice: str = "avocado_v2:MAI_03") -> str:
     """Synthesize text to an audio file via the tts CLI. Returns outpath."""
     proc = subprocess.run(
-        ["/opt/hatch/bin/tts", "speak", "--output", outpath,
+        [TTS_BIN, "speak", "--output", outpath,
          "--voice", voice, "--text-stdin"],
         input=text.encode("utf-8"), capture_output=True, timeout=180)
     if proc.returncode != 0:
         raise RuntimeError(
             f"tts failed: {proc.stderr.decode()[:500]}")
     return outpath
+
+
+class StreamPlayback:
+    """Handle for one tts --stream -> player pipeline.
+
+    The pump thread reads MP3 bytes from the tts process stdout and
+    writes each chunk to both the player stdin and the record file, so
+    playback starts as soon as the first bytes are synthesized (no
+    waiting for the full file) while output/conversation/reply_NN.mp3
+    is still written for the audit record.
+    """
+
+    def __init__(self, tts_proc, player_proc, pump_thread, record_file,
+                 outpath, stop_event):
+        self.tts_proc = tts_proc
+        self.player_proc = player_proc
+        self.pump_thread = pump_thread
+        self._record = record_file
+        self.outpath = outpath
+        self._stop_event = stop_event
+        self._stopped = False
+
+    def poll(self):
+        """None while the player is alive, else its returncode."""
+        return self.player_proc.poll()
+
+    def wait(self, timeout=None):
+        return self.player_proc.wait(timeout=timeout)
+
+    def stop(self):
+        """Pipe-kill: stop the player first, then the synthesizer.
+
+        Idempotent. Signals the pump thread first (it wakes from its
+        select within the timeout, so it never blocks on the tts
+        pipe), terminates (then kills if needed) both processes, then
+        closes the record file and reaps the children so no zombies
+        linger.
+
+        Note: the tts CLI can fork daemon children that inherit its
+        stdout and outlive it, so the pump deliberately never waits
+        on EOF from the tts pipe -- the stop event is what ends it.
+        """
+        if self._stopped:
+            return
+        self._stopped = True
+        self._stop_event.set()
+        for p in (self.player_proc, self.tts_proc):
+            try:
+                if p.poll() is None:
+                    p.terminate()
+            except Exception:
+                pass
+        for p in (self.player_proc, self.tts_proc):
+            try:
+                p.wait(timeout=5)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        # The pump wakes from select within its timeout once the event
+        # is set, so this join is normally instant; the timeout is only
+        # a backstop. The record file is closed after the pump is dead,
+        # so it can never write to a closed file.
+        self.pump_thread.join(timeout=5)
+        try:
+            self._record.close()
+        except Exception:
+            pass
+        for stream in (self.tts_proc.stdout, self.tts_proc.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except Exception:
+                pass
+        for p in (self.tts_proc, self.player_proc):
+            try:
+                p.wait(timeout=0)
+            except Exception:
+                pass
+
+
+def speak_stream(text: str, player_cmd, outpath: str,
+                 voice: str = "avocado_v2:MAI_03",
+                 first_byte_timeout: float = 15.0) -> StreamPlayback:
+    """Synthesize text straight into an audio player via tts --stream.
+
+    Spawns `tts speak --stream` (MP3 bytes on stdout) piped into
+    `player_cmd` (a argv list like ["ffplay", "-nodisp", "-autoexit",
+    "-"]). A pump thread tees each chunk to the player stdin and to
+    `outpath`, preserving the record file. Returns a StreamPlayback
+    handle immediately once the first bytes flow (or the tts process
+    exits); playback start latency is first-byte latency, not
+    full-synthesis latency.
+
+    Raises RuntimeError like speak() if the tts process exits nonzero
+    before producing any bytes.
+    """
+    tts_proc = subprocess.Popen(
+        [TTS_BIN, "speak", "--stream", "--voice", voice, "--text-stdin"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    try:
+        tts_proc.stdin.write(text.encode("utf-8"))
+        tts_proc.stdin.close()
+    except BrokenPipeError:
+        pass  # tts died instantly; the handshake below reports it
+    player_proc = subprocess.Popen(
+        list(player_cmd), stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    record = open(outpath, "wb")
+    state = {"bytes": 0}
+    stop_event = threading.Event()
+
+    def pump():
+        # select + os.read, never a blocking full-size read: the tts
+        # CLI can fork daemon children that inherit its stdout and
+        # keep the pipe open after tts itself exits, so waiting on EOF
+        # -- or on BufferedReader.read(n) filling n bytes -- can block
+        # indefinitely. The stop event bounds every wait instead, and
+        # no exception ever escapes the thread.
+        fd = tts_proc.stdout.fileno()
+        try:
+            while not stop_event.is_set():
+                try:
+                    r, _, _ = select.select([fd], [], [], 0.5)
+                except (OSError, ValueError):
+                    break  # fd closed under us; nothing left to do
+                if stop_event.is_set():
+                    break
+                if not r:
+                    continue
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break  # EOF: tts finished naturally
+                state["bytes"] += len(chunk)
+                try:
+                    record.write(chunk)
+                except ValueError:
+                    break  # record closed after stop(); done
+                try:
+                    player_proc.stdin.write(chunk)
+                except BrokenPipeError:
+                    break  # player died; finally-block cleans up
+        except Exception:
+            pass
+        finally:
+            try:
+                player_proc.stdin.close()  # EOF -> player drains and exits
+            except Exception:
+                pass
+            try:
+                record.flush()
+            except Exception:
+                pass
+
+    pump_thread = threading.Thread(target=pump, daemon=True)
+    pump_thread.start()
+    handle = StreamPlayback(tts_proc, player_proc, pump_thread, record,
+                            outpath, stop_event)
+
+    # Failure handshake: wait for first bytes or tts exit, bounded.
+    # Healthy tts produces first bytes in well under a second; this
+    # keeps the speak() contract (fail fast, raise RuntimeError)
+    # without blocking for the full synthesis.
+    deadline = time.time() + first_byte_timeout
+    while (state["bytes"] == 0 and tts_proc.poll() is None
+           and time.time() < deadline):
+        time.sleep(0.05)
+    rc = tts_proc.poll()
+    if state["bytes"] == 0 and rc is not None and rc != 0:
+        try:
+            err = tts_proc.stderr.read().decode()[:500]
+        except Exception:
+            err = ""
+        handle.stop()
+        raise RuntimeError(f"tts --stream failed: {err}")
+    return handle
 
 
 def audio_duration(path: str) -> float:
@@ -338,6 +527,25 @@ class AsyncTTS:
         self._ex.shutdown(wait=False)
 
 
+def _resolve_player_cmd(player_cmd):
+    """Resolve the streaming audio player command, or None.
+
+    Accepts an argv list or a shell-like string (shlex.split), falling
+    back to the HVA_AUDIO_PLAYER environment variable. Returns None
+    unless the binary resolves via shutil.which -- so a configured-but-
+    missing player degrades to simulated playback instead of crashing.
+    """
+    if player_cmd is None:
+        player_cmd = os.environ.get("HVA_AUDIO_PLAYER")
+    if not player_cmd:
+        return None
+    parts = (shlex.split(player_cmd) if isinstance(player_cmd, str)
+             else list(player_cmd))
+    if not parts or shutil.which(parts[0]) is None:
+        return None
+    return parts
+
+
 class Speaker:
     """Response playback state.
 
@@ -347,14 +555,26 @@ class Speaker:
     it; is_playing() then reflects the device. The barge-in logic only
     needs is_playing()/stop(), so the simulation and the real device
     are interchangeable.
+
+    Streaming mode: pass player_cmd (or set HVA_AUDIO_PLAYER, e.g.
+    "ffplay -nodisp -autoexit -") and playback goes through
+    speak_stream -- tts --stream piped straight into the player, so
+    playback starts at first-byte latency and stop() is a pipe-kill.
+    The record file (output/conversation/reply_NN.mp3) is still
+    written. Without a resolvable player binary, everything behaves
+    exactly as before (simulated).
     """
 
-    def __init__(self, play_fn=None, stop_fn=None):
+    def __init__(self, play_fn=None, stop_fn=None, player_cmd=None):
         self.play_fn = play_fn
         self.stop_fn = stop_fn
+        self.player_cmd = _resolve_player_cmd(player_cmd)
+        # Explicit play_fn/stop_fn win over the streaming player.
+        self.streaming = self.player_cmd is not None and play_fn is None
         self.playing_until: float | None = None
         self.current_file: str | None = None
         self.interrupted = False  # True if the last playback was cut short
+        self._stream: StreamPlayback | None = None
 
     def play(self, path: str, now_s: float):
         dur = audio_duration(path)
@@ -364,12 +584,34 @@ class Speaker:
         if self.play_fn is not None:
             self.play_fn(path)
 
+    def play_stream(self, text: str, outpath: str, now_s: float,
+                    voice: str = "avocado_v2:MAI_03"):
+        """Start streaming playback of text. No-op unless streaming.
+
+        Spawns the tts --stream -> player pipeline (non-blocking) and
+        returns the StreamPlayback handle. Raises RuntimeError if tts
+        fails before producing bytes, like speak().
+        """
+        if not self.streaming:
+            return None
+        self.stop()  # never overlap two playbacks
+        self.interrupted = False
+        self._stream = speak_stream(text, self.player_cmd, outpath,
+                                    voice=voice)
+        self.current_file = outpath
+        return self._stream
+
     def is_playing(self, now_s: float) -> bool:
+        if self._stream is not None:
+            return self._stream.poll() is None
         return (self.playing_until is not None
                 and now_s < self.playing_until)
 
     def stop(self):
-        """Barge-in: halt playback now."""
+        """Barge-in: halt playback now (pipe-kill in streaming mode)."""
+        if self._stream is not None:
+            self._stream.stop()
+            self._stream = None
         if self.stop_fn is not None:
             self.stop_fn()
         self.playing_until = None
@@ -378,6 +620,12 @@ class Speaker:
 
     def check_finished(self, now_s: float) -> bool:
         """True if playback completed naturally (not interrupted)."""
+        if self._stream is not None:
+            if self._stream.poll() is not None:
+                self._stream = None
+                self.current_file = None
+                return True
+            return False
         if self.playing_until is not None and now_s >= self.playing_until:
             self.playing_until = None
             self.current_file = None

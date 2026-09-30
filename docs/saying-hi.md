@@ -177,6 +177,8 @@ timing on this VM (no audio device) -- a real player plugs in via play_fn/
 stop_fn hooks. If the user speaks while a response is still synthesizing,
 the stale response is dropped instead of played.
 
+**Streaming playback (2026-09-30):** setting `HVA_AUDIO_PLAYER` (e.g. `"ffplay -nodisp -autoexit -"`) switches the Speaker from simulated timing to real audio: `tts speak --stream` pipes MP3 bytes straight into the player, so speech starts at first-byte latency instead of after full synthesis. Barge-in is a pipe-kill -- the player is terminated first, then the synthesizer -- and a pump thread tees every chunk to `output/conversation/reply_NN.mp3`, so the audit record is identical in both modes. Shutdown is deterministic: the pump waits on a stop event with a bounded select, never on EOF from the tts pipe (the tts CLI can fork daemon children that inherit its stdout and outlive it, which used to hang the pump and crash it against the closed record file). Without `HVA_AUDIO_PLAYER` set, behavior is byte-identical to before.
+
 **Phantom turns on long silence (observed 2026-09-30):** Whisper can
 hallucinate speech -- prompt-colored toward the system's name -- on
 several seconds of near-silence, and the turn detector will fire on the

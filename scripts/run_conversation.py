@@ -117,7 +117,14 @@ def main():
     policy.llm = llm_backend
     print(f"[llm] backend: {llm_desc}", flush=True)
 
-    speaker = Speaker()
+    speaker = Speaker(player_cmd=os.environ.get("HVA_AUDIO_PLAYER"))
+    if speaker.streaming:
+        print(f"[audio] playback: streaming via "
+              f"{' '.join(speaker.player_cmd)}", flush=True)
+    else:
+        print("[audio] playback: simulated (no audio device -- set "
+              "HVA_AUDIO_PLAYER, e.g. \"ffplay -nodisp -autoexit -\")",
+              flush=True)
     vad = EnergyVAD()
     tts = AsyncTTS()
 
@@ -170,7 +177,9 @@ def main():
             n_barges += 1
             note("BARGE-IN: user speech during playback -- "
                  "stopped response, listening")
-        elif onset and tts.has_pending():
+        elif not speaker.streaming and onset and tts.has_pending():
+            # File mode only: in streaming mode synthesis and playback
+            # are one pipeline, so barge-in above already covers it.
             drop_stale = True
             note("user spoke during TTS synthesis -- "
                  "will drop stale response")
@@ -222,8 +231,20 @@ def main():
             note(f"REPLY ({time.time() - t0:.1f}s to generate): "
                  f"{reply!r}")
             out = os.path.join(args.outdir, f"reply_{n_turns:02d}.mp3")
-            tts.submit(reply, out)  # non-blocking: tick loop continues
-            note(f"TTS queued -> {out}")
+            if speaker.streaming:
+                # Streaming path: tts --stream straight into the
+                # player (non-blocking); the record file is still
+                # written. Barge-in above pipe-kills it.
+                try:
+                    speaker.play_stream(reply, out, now_s)
+                    note(f"SPEAKING (streaming)... ({out})")
+                except RuntimeError as e:
+                    # One bad reply never kills the loop (mirrors the
+                    # AsyncTTS poll_ready failure path in file mode).
+                    note(f"TTS stream failed, skipping reply: {e}")
+            else:
+                tts.submit(reply, out)  # non-blocking: tick loop continues
+                note(f"TTS queued -> {out}")
 
         if speaker.check_finished(now_s):
             note("done speaking -- listening")
