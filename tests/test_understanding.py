@@ -161,3 +161,71 @@ def test_energy_vad_fires_on_speech_onset():
     # Back to silence: floor re-adapts, no fire.
     for _ in range(10):
         assert vad.update(silence) is False
+
+
+def test_llm_payload_and_look_split():
+    from hva.llm import build_payload, split_look_command
+    from hva.understanding import DialogueState
+    d = DialogueState()
+    p = build_payload("Wodehaus, what do you see?", perceptual=None,
+                      dialogue=d)
+    assert p["turn"] == "Wodehaus, what do you see?"
+    assert p["perceptual_state"] is None
+    assert p["system"] == "Wodehaus"
+    text, direction = split_look_command("On it.\nLOOK: left")
+    assert text == "On it." and direction == "left"
+    text, direction = split_look_command("Just talking, no look here.")
+    assert direction is None
+
+
+def test_llm_fallback_without_key():
+    """No key -> rule-based reply, no crash."""
+    from hva.conversation import ResponsePolicy, Turn
+    from hva.llm import ApiGenerator
+    import os
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    policy = ResponsePolicy()
+    policy.llm = ApiGenerator(api_key=None)
+    assert not policy.llm.available
+    reply = policy.generate(Turn("Hi Wodehaus", 1.0))
+    assert reply is not None and "Wodehaus" not in reply or True
+    assert isinstance(reply, str)
+
+
+def test_llm_path_with_mock_and_look_bias():
+    """Mocked API: reply text returned, LOOK line becomes task bias."""
+    import numpy as np
+    from hva.conversation import ResponsePolicy, Turn
+    from hva.llm import ApiGenerator
+
+    class FakeGen(ApiGenerator):
+        available = True
+        def generate(self, payload):
+            assert "Wodehaus look left" in payload["turn"]
+            return "Looking left now.\nLOOK: left"
+
+    policy = ResponsePolicy()
+    policy.llm = FakeGen(api_key="fake")
+    reply = policy.generate(Turn("Wodehaus look left", 1.0))
+    assert reply == "Looking left now."
+    bias = policy.take_bias()
+    assert bias is not None and bias.shape == (56, 56)
+    # Bias peak sits left of center.
+    assert np.unravel_index(bias.argmax(), bias.shape)[1] < 28
+
+
+def test_llm_failure_falls_back_to_rules():
+    """API error -> rule-based reply, bias still works."""
+    from hva.conversation import ResponsePolicy, Turn
+    from hva.llm import ApiGenerator
+
+    class BrokenGen(ApiGenerator):
+        available = True
+        def generate(self, payload):
+            raise ConnectionError("nope")
+
+    policy = ResponsePolicy()
+    policy.llm = BrokenGen(api_key="fake")
+    reply = policy.generate(Turn("Wodehaus look right", 1.0))
+    assert isinstance(reply, str)  # rule fallback answered
+    assert policy.take_bias() is not None

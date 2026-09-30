@@ -93,7 +93,7 @@ class TurnDetector:
 
 
 class ResponsePolicy:
-    """v2: grounded responses via hva.understanding.
+    """v3: grounded responses via hva.understanding, LLM-backed via hva.llm.
 
     generate(turn) -> str | None. When a PerceptualState is attached
     (policy.perceptual = PerceptualState(loop)), "what do you see?"
@@ -101,8 +101,11 @@ class ResponsePolicy:
     is stashed on policy.pending_bias for the tick loop to pick up
     with take_bias().
 
-    The generate() signature is still the LLM seam: a future policy
-    takes the turn plus perceptual context and returns text.
+    Attach an LLM backend with policy.llm = ApiGenerator(...). generate()
+    then sends build_payload() to the API and parses an optional trailing
+    `LOOK: <direction>` line into a task bias. No key or any API error ->
+    falls back to the rule-based understand(). The rules are the
+    deterministic floor; the API is the ceiling.
     """
 
     def __init__(self, system_name: str = "Wodehaus"):
@@ -110,15 +113,36 @@ class ResponsePolicy:
         self.perceptual: PerceptualState | None = None
         self.dialogue = DialogueState()
         self.pending_bias = None  # 56x56 array for the tick loop, or None
+        self.llm = None  # hva.llm.ApiGenerator or compatible
 
     def generate(self, turn: Turn) -> str | None:
         if not is_addressed(turn.text):
             return None
+        if self.llm is not None and self.llm.available:
+            try:
+                return self._generate_llm(turn)
+            except Exception as e:  # API failure -> rule fallback
+                print(f"[policy] LLM failed ({e}); using rule fallback",
+                      flush=True)
         reply, bias = understand(turn.text,
                                  perceptual=self.perceptual,
                                  dialogue=self.dialogue)
         self.pending_bias = bias
         return reply
+
+    def _generate_llm(self, turn: Turn) -> str:
+        from hva.llm import build_payload, split_look_command
+        from hva.understanding import direction_bias
+        payload = build_payload(turn.text,
+                                perceptual=self.perceptual,
+                                dialogue=self.dialogue)
+        raw = self.llm.generate(payload)
+        text, direction = split_look_command(raw)
+        self.pending_bias = (direction_bias(direction)
+                             if direction else None)
+        # Keep the dialogue state in sync even on the LLM path.
+        self.dialogue.add(turn.text, "llm", text, region=direction)
+        return text or None
 
     def take_bias(self):
         """One-shot retrieval for the tick loop; clears after reading."""
