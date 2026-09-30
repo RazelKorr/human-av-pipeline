@@ -1,6 +1,10 @@
-# Saying hi — as-built (2026-09-30)
+# Saying hi, and understanding — as-built (2026-09-30)
 
-The pipeline can now hear its name and answer. The full loop:
+The pipeline can now hear its name, answer, and — short of a full
+language model — comprehend: grounding words in its own perceptual
+state.
+
+## The "saying hi" loop
 
   hail audio -> RollingTranscriber -> TurnDetector -> ResponsePolicy
       -> tts speak -> response audio file
@@ -9,22 +13,51 @@ Demo: `python scripts/demo_say_hi.py hail_16k.wav --outdir /tmp/sayhi`
 
 Verified 2026-09-30: a TTS-synthesized "Hi Wodehaus, can you hear me?"
 (1.9 s) was transcribed, detected, answered, and spoken back as an
-8.16 s MP3. Whisper heard the name as "I would house" -- the fuzzy
+8.16 s MP3. Whisper heard the name as "I would house" — the fuzzy
 name matcher caught it.
+
+## Comprehension (`hva/understanding.py`)
+
+Thesis: for this system, comprehension means grounding words in its
+perceptual state — not generating text about seeing, but consulting
+the map.
+
+- **Intent** (rule-based): greeting, farewell, identity, see-question,
+  hear-question, look-command, look-at-thing, thanks, yes/no, wh-,
+  statement.
+- **PerceptualState**: read-only view over a live OnlineLevel3 — gaze
+  location, recent saccades, map peak, plain-language `describe()`.
+- **Language → perception**: "look left" becomes a Gaussian bias blob
+  on the 56×56 joint map via the `task_bias` channel (added to
+  `JointPriorityMap.step()` and `OnlineLevel3.tick()`). The saccade
+  controller reads the combined map, so language steers gaze through
+  the same machinery the senses use. A command is a nudge, not a
+  clamp — the blob decays with the map.
+- **DialogueState**: turn history (last 10), last-mentioned region.
+- **Honest limits**: "look at the red car" → "I don't know what things
+  look like yet." No object recognition; the bias channel needs a
+  target the system can locate (directions, not things).
+
+Demo: `python scripts/demo_understand.py`
+
+Verified 2026-09-30: with a salient blob on the right, gaze sat at
+(174,114). "Wodehaus look left" moved it to (62,110) for the 3 s the
+bias was held, then it returned. "What do you see?" answered from the
+live loop: "I'm looking at the right of the frame... I've made 33
+saccades so far."
 
 ## Components (`hva/conversation.py`)
 
 **TurnDetector**: watches the rolling transcript. Fires when the
 system's name appears in new words AND no word has ended within
 `silence_s` (default 1.5 s). Returns the addressed span as a Turn.
-Only reasons over transcribed words -- it never claims to have heard
+Only reasons over transcribed words — it never claims to have heard
 what the transcriber hasn't produced yet.
 
-**ResponsePolicy**: v1 is template-based and deliberately honest.
-Greeting -> greeting with echo. Question -> echo plus "I can hear the
-words, but I don't understand them yet." Statement -> acknowledgment
-with echo. `generate(turn)` is the LLM seam: a future policy takes the
-turn plus perceptual context (gaze target, scene notes) and returns text.
+**ResponsePolicy** (v2): grounded via `hva.understanding`. Attach a
+live loop with `policy.perceptual = PerceptualState(loop)`; "look"
+biases land on `policy.pending_bias` for the tick loop to collect with
+`take_bias()`. `generate(turn)` remains the LLM seam.
 
 **speak()**: synthesizes via `/opt/hatch/bin/tts speak` (default voice
 avocado_v2:MAI_03). Writes MP3 to a caller-chosen path.
@@ -33,12 +66,13 @@ avocado_v2:MAI_03). Writes MP3 to a caller-chosen path.
 
 - **No real-time duplex.** The demo runs the loop on a clip. A live
   call needs the stream runner feeding the transcriber continuously
-  with the detector/policy/speak in the tick loop -- the pieces exist,
+  with the detector/policy/speak in the tick loop — the pieces exist,
   the wiring doesn't.
 - **No barge-in.** V1 waits for end-of-utterance. Interruption is a
   policy decision for later.
-- **No understanding.** The policy echoes; it does not comprehend. The
-  honest responses say so out loud.
+- **No deep understanding.** Intents are patterns, not semantics. The
+  module reports what it did ("I looked left because you said left"),
+  it does not pretend to grasp meaning.
 - **No output device on this VM** (`/dev/snd` doesn't exist). Output is
   a file. On a real host, play it through speakers or route it to the
   call.
@@ -66,7 +100,10 @@ Latency budget (measured 2026-09-30):
 
 ## Tests
 
-`tests/test_conversation.py`: 6 tests -- name variants (including the
+`tests/test_conversation.py`: 6 tests — name variants (including the
 observed "would house" mishearing), turn firing on name+silence, no
 double-fire, unaddressed speech ignored, greeting/question/silence
-policy branches. All pass.
+policy branches.
+`tests/test_understanding.py`: 10 tests — intent classification,
+direction extraction, bias targeting, perceptual description, dialogue
+history, and the end-to-end language→map→peak proof. All pass.

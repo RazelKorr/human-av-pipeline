@@ -45,11 +45,16 @@ class OnlineLevel3:
         self.next_decision = 100.0
         self.n_ticks = 0
 
-    def tick(self, t_ms, vis_sal, aud, speech=0.0):
-        """Process one 100 ms moment arriving at stream clock t_ms."""
+    def tick(self, t_ms, vis_sal, aud, speech=0.0, task_bias=None):
+        """Process one 100 ms moment arriving at stream clock t_ms.
+
+        task_bias: optional (56,56) top-down bias array (e.g. from
+        language -- "look left"). Written to the shared map alongside
+        vision and audio. None = no bias.
+        """
         t = float(t_ms)
         self.jmap.step(100.0, vis_sal=vis_sal, aud=aud,
-                       speech=float(speech))
+                       speech=float(speech), task_bias=task_bias)
         self.maps.append(self.jmap.map.copy())
         self.peaks.append(self.jmap.peak())
 

@@ -74,7 +74,8 @@ class JointPriorityMap:
         self.tau_ms = tau_ms
         self.map = np.zeros((size, size), dtype=np.float32)
 
-    def step(self, dt_ms, vis_sal=None, aud=None, speech=0.0):
+    def step(self, dt_ms, vis_sal=None, aud=None, speech=0.0,
+             task_bias=None):
         """Integrate one tick.
 
         vis_sal: (56,56) array in ~[0,1], or None.
@@ -87,11 +88,18 @@ class JointPriorityMap:
             data shows vision keeps working during dense narration
             (title-card dwells), so global visual attenuation during
             speech would be wrong.
+        task_bias: optional (56,56) array -- top-down bias, e.g. from
+            language ("look left"). Added directly to the map, same as
+            any other writer. Decays with the map. None = no bias.
         Returns the map.
         """
         self.map *= np.exp(-dt_ms / self.tau_ms)
         if vis_sal is not None:
             self.map += self.w_vis * vis_sal
+        if task_bias is not None:
+            tb = np.asarray(task_bias, dtype=np.float32)
+            if tb.shape == self.map.shape:
+                self.map += tb
         if aud is not None:
             bin_sal, bin_pan = aud
             # Last-ditch input sanitation: a NaN pan used to poison the

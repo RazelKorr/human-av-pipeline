@@ -26,38 +26,11 @@ Design notes:
   - V1 does not barge in. It waits for the utterance to end. Interruption
     is a later policy decision, not a missing feature.
 """
-import re
 import subprocess
 
-# Consonant skeletons the name is heard as. "Wodehaus" -> W-D-H-S.
-# Whisper variants observed or expected: woodhouse, wodehouse, vodehaus,
-# wodehaus, wood house, what house (mishear). We keep this list short and
-# explicit -- a fuzzy matcher that matches everything matches nothing.
-NAME_PATTERNS = [
-    r"wodehaus",
-    r"woodhouse",
-    r"wodehouse",
-    r"vodehaus",
-    r"vodahaus",
-    r"wood\s+house",
-    r"would\s+house",   # Whisper heard "Hi Wodehaus" as "I would house"
-    r"what\s+house",
-]
-
-GREETING_WORDS = {
-    "hi", "hello", "hey", "greetings", "good morning", "good afternoon",
-    "good evening", "howdy",
-}
-
-
-def _normalize(text: str) -> str:
-    return re.sub(r"[^a-z\s]", "", text.lower())
-
-
-def is_addressed(text: str) -> bool:
-    """True if the system's name appears in the text (fuzzy)."""
-    norm = _normalize(text)
-    return any(re.search(p, norm) for p in NAME_PATTERNS)
+from hva.understanding import (  # noqa: F401  (re-exported for callers)
+    NAME_PATTERNS, _normalize, is_addressed,
+    DialogueState, PerceptualState, understand)
 
 
 class Turn:
@@ -120,30 +93,38 @@ class TurnDetector:
 
 
 class ResponsePolicy:
-    """V1: template responses, honest about perceptual limits.
+    """v2: grounded responses via hva.understanding.
 
-    generate(turn) -> str | None. None means stay silent (not addressed
-    to us -- the detector should already filter, this is the backstop).
-    The method signature is the LLM seam: a future policy takes the turn
-    plus perceptual context (gaze target, scene description) and returns
-    text. V1 reports what it heard; it does not confabulate understanding.
+    generate(turn) -> str | None. When a PerceptualState is attached
+    (policy.perceptual = PerceptualState(loop)), "what do you see?"
+    consults the live map and "look left" steers it -- the bias array
+    is stashed on policy.pending_bias for the tick loop to pick up
+    with take_bias().
+
+    The generate() signature is still the LLM seam: a future policy
+    takes the turn plus perceptual context and returns text.
     """
 
     def __init__(self, system_name: str = "Wodehaus"):
         self.system_name = system_name
+        self.perceptual: PerceptualState | None = None
+        self.dialogue = DialogueState()
+        self.pending_bias = None  # 56x56 array for the tick loop, or None
 
     def generate(self, turn: Turn) -> str | None:
         if not is_addressed(turn.text):
             return None
-        norm = _normalize(turn.text)
-        if any(g in norm for g in GREETING_WORDS):
-            return (f"Hello! This is {self.system_name}. "
-                    f"I heard you say: {turn.text.strip()}")
-        if "?" in turn.text:
-            return (f"I heard your question: {turn.text.strip()} "
-                    f"I can hear the words, but I don't understand "
-                    f"them yet -- that's the next thing to build.")
-        return (f"Yes, I'm here. I heard: {turn.text.strip()}")
+        reply, bias = understand(turn.text,
+                                 perceptual=self.perceptual,
+                                 dialogue=self.dialogue)
+        self.pending_bias = bias
+        return reply
+
+    def take_bias(self):
+        """One-shot retrieval for the tick loop; clears after reading."""
+        b = self.pending_bias
+        self.pending_bias = None
+        return b
 
 
 def speak(text: str, outpath: str,
