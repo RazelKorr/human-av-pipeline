@@ -27,7 +27,7 @@ def test_classify_intents():
     assert classify("look at the red car") == Intent.LOOK_AT
     assert classify("thanks wodehaus") == Intent.THANKS
     assert classify("can you hear me") == Intent.YESNO_QUESTION
-    assert classify("where is the exit") == Intent.WH_QUESTION
+    assert classify("where is the exit") == Intent.LOOK_AT  # visual search
 
 
 def test_look_direction():
@@ -736,3 +736,51 @@ def test_spatial_grounded_reply():
     # bias peaks at the left track
     peak = bias.argmax()
     assert peak % 56 < 28
+
+
+def _fake_detect(queries):
+    # a "gate" box centered at (160, 80)px -> map (40, 20)
+    return [("gate", 40.0, 20.0, 0.55)] if "gate" in queries[0] else []
+
+
+def test_detect_fallback_finds_unseen():
+    mem = ObjectMemory()
+    reply, bias = understand("wodehaus where is the gate",
+                             memory=mem, t_now_ms=1000.0,
+                             detect_fn=_fake_detect)
+    assert bias is not None
+    assert "Found the gate" in reply
+    iy, ix = divmod(int(bias.argmax()), 56)
+    assert (ix, iy) == (40, 20)
+    # the detection becomes a track: follow-up uses memory, not detect
+    reply2, bias2 = understand("wodehaus look at the gate",
+                               memory=mem, t_now_ms=2000.0,
+                               detect_fn=lambda q: [])
+    assert "Looking at the gate" in reply2
+
+
+def test_detect_not_used_for_spatial():
+    mem = ObjectMemory()
+    calls = []
+    reply, bias = understand("wodehaus look at the leftmost gate",
+                             memory=mem, t_now_ms=1000.0,
+                             detect_fn=lambda q: calls.append(q) or [])
+    assert bias is None and not calls
+    assert "don't know" in reply
+
+
+def test_detect_exception_stays_honest():
+    def boom(q):
+        raise RuntimeError("nope")
+    reply, bias = understand("wodehaus find the gate",
+                             memory=ObjectMemory(), t_now_ms=1000.0,
+                             detect_fn=boom)
+    assert bias is None
+    assert "don't know" in reply
+
+
+def test_find_and_where_is_intent():
+    assert classify("wodehaus find the gate") == Intent.LOOK_AT
+    assert classify("wodehaus where is the gate") == Intent.LOOK_AT
+    assert extract_referent("wodehaus find the gate") == "gate"
+    assert extract_referent("wodehaus where is the gate") == "gate"

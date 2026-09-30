@@ -173,6 +173,8 @@ class ResponsePolicy:
         self.memory = ObjectMemory()  # fed by the foveal recognizer
         self.pending_bias = None  # 56x56 array for the tick loop, or None
         self.llm = None  # hva.llm.ApiGenerator or compatible
+        self.detector = None  # hvp.detect.ObjectDetector or compatible
+        self.frame_fn = None  # () -> PIL 224x224 RGB frame or None
 
     def generate(self, turn: Turn) -> str | None:
         if not is_addressed(turn.text):
@@ -189,12 +191,27 @@ class ResponsePolicy:
         if self.perceptual is not None:
             gx, gy = self.perceptual.gaze_now()
             gaze = (gx / 4.0, gy / 4.0)
+        detect_fn = None
+        if self.detector is not None and self.frame_fn is not None:
+            def detect_fn(queries):
+                frame = self.frame_fn()
+                if frame is None:
+                    return []
+                out = []
+                # OWL-ViT wants noun phrases: "window" -> "a window".
+                dets = self.detector.detect(
+                    frame, [f"a {q}" for q in queries])
+                for det in dets:
+                    mx, my = self.detector.box_center_map(det)
+                    out.append((det[0], mx, my, det[5]))
+                return out
         reply, bias = understand(turn.text,
                                  perceptual=self.perceptual,
                                  dialogue=self.dialogue,
                                  memory=self.memory,
                                  t_now_ms=turn.t_end * 1000.0,
-                                 gaze_xy=gaze)
+                                 gaze_xy=gaze,
+                                 detect_fn=detect_fn)
         self.pending_bias = bias
         return reply
 

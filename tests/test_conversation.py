@@ -388,3 +388,28 @@ def test_describe_without_memory_unchanged():
     p = PerceptualState(_FakeLoop())
     d = p.describe()
     assert "recognized" not in d
+
+
+def test_policy_detector_wiring():
+    from PIL import Image
+
+    class StubDetector:
+        def detect(self, frame, queries):
+            assert queries == ["a gate"], queries
+            return [("a gate", 150.0, 70.0, 170.0, 90.0, 0.55)]
+
+        @staticmethod
+        def box_center_map(det):
+            _, x0, y0, x1, y1, _ = det
+            return ((x0 + x1) / 2.0 / 4.0, (y0 + y1) / 2.0 / 4.0)
+
+    pol = ResponsePolicy()
+    pol.detector = StubDetector()
+    pol.frame_fn = lambda: Image.new("RGB", (224, 224))
+    reply = pol.generate(Turn("Wodehaus where is the gate", 1.0))
+    assert reply is not None and "Found the gate" in reply
+    assert pol.pending_bias is not None
+    iy, ix = divmod(int(pol.pending_bias.argmax()), 56)
+    assert (ix, iy) == (40, 20)
+    # the detection became a track in policy memory
+    assert pol.memory.locate("gate", 2000.0) is not None

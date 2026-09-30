@@ -101,3 +101,20 @@ def test_text_cache_keyed_by_prompt():
     clf.distribution(crop, ["x"])  # same prompts -> cache hit
     clf.distribution(crop, ["y"])  # new prompts -> recompute
     assert len(calls) == 2  # second ["x"] served from cache
+
+
+def test_owlvit_detects_window_in_crop():
+    pytest.importorskip("transformers")
+    from hvp.detect import ObjectDetector
+    from scripts.audit_recognition import extract_crops, MONTAGE
+    crops = extract_crops(MONTAGE)
+    crop = crops[10].convert("RGB").resize((224, 224))  # hand-labeled
+    det = ObjectDetector()                              # "windows"
+    dets = det.detect(crop, ["a window", "a gate", "a sign"],
+                      threshold=0.05)
+    assert dets, "no detections at all"
+    top = dets[0]
+    assert top[0] == "a window", f"top detection was {top[0]}"
+    assert top[5] > 0.10
+    mx, my = ObjectDetector.box_center_map(top)
+    assert 0 <= mx <= 56 and 0 <= my <= 56

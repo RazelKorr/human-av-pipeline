@@ -105,7 +105,8 @@ def classify(text: str) -> str:
     m = re.search(r"\blook\s+(left|right|up|down|center|centre|middle)\b", norm)
     if m:
         return Intent.LOOK_COMMAND
-    if re.search(r"\blook at\b|\blook toward", norm):
+    if re.search(r"\blook at\b|\blook toward|\bfind the\b|"
+                 r"\bwhere is\b|\bwheres\b|where's|\blocate the\b", norm):
         return Intent.LOOK_AT
     if re.search(r"\bthank", norm):
         return Intent.THANKS
@@ -381,8 +382,10 @@ def _normalize_name(name: str) -> str:
 
 
 def extract_referent(text: str) -> str | None:
-    """Pull the X out of 'look at (the) X' / 'look toward (the) X'."""
-    m = re.search(r"\blook\s+(?:at|toward(?:s)?)\s+(?:the\s+|a\s+|an\s+)?"
+    """Pull the X out of 'look at (the) X' / 'find (the) X' /
+    'where is (the) X'."""
+    m = re.search(r"\b(?:look\s+(?:at|toward(?:s)?)|find|locate|"
+                  r"where(?:'s|\s+is))\s+(?:the\s+|a\s+|an\s+)?"
                   r"(.+?)(?:\s+please)?\s*$", _normalize(text))
     if not m:
         return None
@@ -498,13 +501,16 @@ def understand(turn_text: str,
                memory: ObjectMemory | None = None,
                t_now_ms: float = 0.0,
                gaze_xy: tuple[float, float] | None = None,
+               detect_fn=None,
                ) -> tuple[str, str | None]:
     """Classify and respond. Returns (response_text, task_bias|None).
 
     task_bias is a 56x56 array for the perception loop, or None.
     memory is the ObjectMemory the loop feeds; t_now_ms anchors
     sighting ages; gaze_xy is the current fixation in map coords
-    (for 'nearest'/'farthest').
+    (for 'nearest'/'farthest'). detect_fn, when provided, is called
+    as detect_fn([query]) -> [(label, map_x, map_y, conf)] and is the
+    last resort for referents with no track in memory.
     """
     intent = classify(turn_text)
     bias = None
@@ -558,14 +564,38 @@ def understand(turn_text: str,
                 dialogue.last_region = matched
             reply = (f"Looking at the {matched} -- I saw it {where}.")
         else:
-            known = memory.known_objects() if memory is not None else []
-            if referent:
-                reply = (f"I don't know what a {referent} looks like yet")
+            # Last resort: scan the current frame for something never
+            # fixated. Only when not a spatial query (those are relative
+            # among known tracks) and a detector hook is provided.
+            found = None
+            if (detect_fn is not None and referent
+                    and not spatial_word and memory is not None):
+                try:
+                    dets = detect_fn([referent])
+                except Exception:
+                    dets = None
+                if dets:
+                    label, mx, my, conf = dets[0]
+                    memory.add(label, mx, my, t_now_ms, conf)
+                    found = (label, mx, my, conf)
+            if found is not None:
+                label, mx, my, conf = found
+                bias = object_bias(mx, my, strength=1.2 * conf)
+                where = _qualitative(mx * 4.0, my * 4.0)
+                if dialogue is not None:
+                    dialogue.last_region = label
+                reply = (f"Found the {referent} -- looking at it {where}.")
             else:
-                reply = "I couldn't tell what you want me to look at"
-            if known:
-                reply += f" -- so far I've recognized: {', '.join(known)}"
-            reply += "."
+                known = (memory.known_objects()
+                         if memory is not None else [])
+                if referent:
+                    reply = (f"I don't know what a {referent} looks like yet")
+                else:
+                    reply = "I couldn't tell what you want me to look at"
+                if known:
+                    reply += (f" -- so far I've recognized: "
+                              f"{', '.join(known)}")
+                reply += "."
     elif intent == Intent.THANKS:
         reply = "You're welcome."
     elif intent in (Intent.YESNO_QUESTION, Intent.WH_QUESTION):

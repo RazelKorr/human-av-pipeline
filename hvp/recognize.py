@@ -80,6 +80,10 @@ class FovealClassifier:
 
     def _ensure(self):
         if self._model is None:
+            # Bracketed IPv6 literals in no_proxy break httpx parsing
+            # (see hvp/detect.py); HF hub goes through httpx.
+            os.environ["NO_PROXY"] = "localhost,127.0.0.1"
+            os.environ["no_proxy"] = "localhost,127.0.0.1"
             from transformers import CLIPModel, CLIPProcessor
             self._processor = CLIPProcessor.from_pretrained(self.model_id)
             self._model = CLIPModel.from_pretrained(self.model_id)
