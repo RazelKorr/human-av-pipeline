@@ -51,6 +51,17 @@ saccades so far."
 **TurnDetector**: watches the rolling transcript. Fires when the
 system's name appears in new words AND no word has ended within
 `silence_s` (default 1.5 s). Returns the addressed span as a Turn.
+Two evidence-based guards, no phrase blacklists: **acoustic
+agreement** — when given a `speech(t0, t1)` callable (fraction of
+the span with acoustic speech energy, wired from per-tick
+`EnergyVAD.hot` history in the runner), the addressed span must
+clear `min_speech_frac` (default 0.2), suppressing Whisper
+hallucinations over silence as `no_speech`; and **re-fire
+suppression** — a turn whose span overlaps the previous fired
+turn's span (+`refire_margin_s`, default 1.0 s) is suppressed as
+`refire`, defeating duplicate turns from overlapping transcription
+windows re-emitting the same utterance. Suppressed turns are
+recorded on `detector.suppressed` as `(reason, text)`.
 Only reasons over transcribed words — it never claims to have heard
 what the transcriber hasn't produced yet.
 
@@ -60,9 +71,12 @@ biases land on `policy.pending_bias` for the tick loop to collect with
 `take_bias()`. `generate(turn)` is the LLM seam: attach `ApiGenerator`
 (Anthropic API, needs `ANTHROPIC_API_KEY`), `HFGenerator` (HuggingFace
 Inference Providers, needs `HF_TOKEN`, free tier, default model
-`Qwen/Qwen3-8B`), `PollinationsGenerator` (Pollinations.ai classic
-endpoint — no account, no key, rate-limited by IP; a third party sees
-the prompts, so prototyping only), or `LocalGenerator` (llama-server
+`Qwen/Qwen3-8B`), `PollinationsGenerator` (Pollinations.ai OpenAI-compatible endpoint:
+keyless JSON POST to `https://text.pollinations.ai/openai` — no
+account, no key, rate-limited by IP. Dialogue and perceptual
+snapshots travel in the request body, but it is still a
+third-party/public service with no SLA and no model guarantee, so
+non-sensitive prototyping only), or `LocalGenerator` (llama-server
 at `--llm-url`) via `--llm {none,api,local,hf,free,auto}`
 (`--hf-model` / `--free-model` override the models). `auto` tries
 local, then HF, then API, then the keyless free backend — free before
@@ -89,6 +103,11 @@ dropped as stale.
 - **No output device on this VM** (`/dev/snd` doesn't exist). Output is
   a file. On a real host, play it through speakers or route it to the
   call.
+- **The acoustic gate hears energy, not identity.** The phantom-turn
+  defense rejects transcript claims over digital silence, but any
+  speech-energy in the addressed span passes the gate — far-end call
+  audio or a TV in the room counts as "acoustic speech". Speaker
+  separation is still unsolved.
 
 ## Zoom plumbing (for a real machine)
 
@@ -113,15 +132,20 @@ Latency budget (measured 2026-09-30):
 
 ## Tests
 
-`tests/test_conversation.py`: 12 tests — name variants (including the
+`tests/test_conversation.py`: 19 tests — name variants (including the
 observed "would house" mishearing), turn firing on name+silence, no
 double-fire, unaddressed speech ignored, greeting/question/silence
 policy branches, plus 2 AsyncTTS tests (ticks continue during slow
 synthesis; synthesis failure doesn't kill the loop), plus 3 LLM-path
 tests: the LOOK backstop steers from classified intent when the model
 drops the LOOK line, an explicit LOOK line still wins, and ordinary
-replies leave the shared map alone.
-`tests/test_understanding.py`: 10 tests — intent classification,
+replies leave the shared map alone. Phantom-turn defense: hallucination
+over digital silence suppressed (`no_speech`), real acoustically
+supported speech passes, window re-fires suppressed (`refire`) while a
+genuine later address still fires, per-tick `EnergyVAD.hot` presence,
+and a runner-level regression test proving the trailing audio chunk
+reaches the loop (the old flush bug: 105 moments instead of ~138).
+`tests/test_understanding.py`: 34 tests — intent classification,
 direction extraction, bias targeting, perceptual description, dialogue
 history, and the end-to-end language→map→peak proof. All pass.
 

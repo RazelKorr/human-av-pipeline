@@ -79,15 +79,19 @@ equal-strength flash/click conflict that vision otherwise wins.
 
 The pipeline talks back. `scripts/run_conversation.py` runs the live
 loop: `TurnDetector` (name + end-of-utterance from the rolling
-transcript, fuzzy on Whisper's mishearings) -> `ResponsePolicy` v3
-(grounded in the live perceptual loop via `hva.understanding`, LLM
-seam via `hva.llm`, rule-based fallback) -> `AsyncTTS` (non-blocking
-synthesis so the 10 Hz tick never stalls). Live duplex with
-`EnergyVAD` barge-in: if you speak mid-response, playback stops and
-the turn is re-taken. `--llm {none,api,local,auto}` selects the
-language-model backend (default `none`; `auto` tries local
-llama-server, then API if `ANTHROPIC_API_KEY` is set). See
-`docs/saying-hi.md`.
+transcript, fuzzy on Whisper's mishearings, guarded against
+hallucinated turns by acoustic agreement and re-fire suppression)
+-> `ResponsePolicy` v3 (grounded in the live perceptual loop via
+`hva.understanding`, LLM seam via `hva.llm`, rule-based fallback)
+-> `AsyncTTS` (non-blocking synthesis so the 10 Hz tick never stalls).
+Live duplex with `EnergyVAD` barge-in: if you speak mid-response,
+playback stops and the turn is re-taken. `--llm
+{none,api,local,hf,free,auto}` selects the language-model backend
+(default `none`; `auto` tries local llama-server, then HuggingFace
+(free tier) if `HF_TOKEN` is set, then Anthropic if
+`ANTHROPIC_API_KEY` is set, then the keyless Pollinations POST
+endpoint). See `docs/saying-hi.md` and
+`docs/real-scene-grounding.md`.
 
 ## Running it
 

@@ -292,7 +292,8 @@ def select_llm_backend(choice: str = "none",
     quota without an explicit flag.
 
     choice: "none" | "api" | "local" | "hf" | "free" | "auto"
-      free = Pollinations.ai classic endpoint: no account, no key.
+      free = Pollinations.ai OpenAI-compatible POST endpoint
+             (keyless JSON body): no account, no key.
       auto tries local llama-server first, then HuggingFace (free tier)
       if tokened, then API if keyed, then the keyless free backend,
       else none. Free before paid; your own credentials before a
