@@ -242,21 +242,62 @@ def object_bias(map_x: float, map_y: float, strength: float = 1.2,
 
 # ------------------------------------------------------ object memory
 
+class Track:
+    """One hypothesized object: sightings of the same label, associated
+    across fixations by proximity in space and time.
+
+    Position and confidence are exponentially smoothed, so a flickering
+    classifier (light-strip/dark/light-strip across three fixations)
+    yields a stable track instead of a jumping point.
+    """
+    _next_id = 0
+
+    def __init__(self, label: str, map_x: float, map_y: float,
+                 t_ms: float, conf: float, smooth: float = 0.5):
+        Track._next_id += 1
+        self.id = Track._next_id
+        self.label = label
+        self.smooth = smooth
+        self.x = map_x
+        self.y = map_y
+        self.conf = conf
+        self.created_t = t_ms
+        self.last_t = t_ms
+        self.hits = 1
+
+    def update(self, map_x: float, map_y: float, t_ms: float,
+               conf: float):
+        a = self.smooth
+        self.x = a * map_x + (1 - a) * self.x
+        self.y = a * map_y + (1 - a) * self.y
+        self.conf = a * conf + (1 - a) * self.conf
+        self.last_t = t_ms
+        self.hits += 1
+
+    def age(self, t_now: float) -> float:
+        return t_now - self.last_t
+
+
 class ObjectMemory:
     """What the eyes have recognized, and where.
 
     The perceptual loop records (label, map_x, map_y, t_ms, conf) each
-    time the foveal classifier fires; language resolves "look at the X"
-    against the most recent confident sighting. Out-of-vocabulary or
-    never-seen objects simply aren't here -- the honest miss.
+    time the foveal classifier fires; sightings of the same label near
+    each other in space and time are associated into Tracks. Language
+    resolves "look at the X" against the most recent confident track.
+    Out-of-vocabulary or never-seen objects simply aren't here -- the
+    honest miss.
     """
 
     def __init__(self, max_sightings: int = 200,
-                 min_conf: float = 0.30, max_age_ms: float = 60000.0):
+                 min_conf: float = 0.30, max_age_ms: float = 60000.0,
+                 assoc_dist: float = 10.0):
         self.sightings: list[tuple[str, float, float, float, float]] = []
+        self.tracks: list[Track] = []
         self.max_sightings = max_sightings
         self.min_conf = min_conf
         self.max_age_ms = max_age_ms
+        self.assoc_dist = assoc_dist
 
     def add(self, label: str, map_x: float, map_y: float,
             t_ms: float, conf: float):
@@ -264,21 +305,50 @@ class ObjectMemory:
             return
         self.sightings.append((label, map_x, map_y, t_ms, conf))
         self.sightings = self.sightings[-self.max_sightings:]
+        self._associate(label, map_x, map_y, t_ms, conf)
+
+    def _associate(self, label: str, map_x: float, map_y: float,
+                   t_ms: float, conf: float):
+        want = _normalize_name(label)
+        best = None
+        best_d2 = self.assoc_dist ** 2
+        for tr in self.tracks:
+            if _normalize_name(tr.label) != want:
+                continue
+            if t_ms - tr.last_t > self.max_age_ms:
+                continue
+            d2 = (tr.x - map_x) ** 2 + (tr.y - map_y) ** 2
+            if d2 < best_d2:
+                best, best_d2 = tr, d2
+        if best is None:
+            self.tracks.append(Track(label, map_x, map_y, t_ms, conf))
+        else:
+            best.update(map_x, map_y, t_ms, conf)
+
+    def _live_tracks(self, t_now: float) -> list[Track]:
+        return [tr for tr in self.tracks
+                if 0 <= t_now - tr.last_t <= self.max_age_ms]
 
     def locate(self, name: str, t_now: float
                ) -> tuple[float, float, float, float] | None:
-        """Most recent sighting of `name`: (map_x, map_y, conf, age_ms)."""
+        """Best track of `name`: (map_x, map_y, conf, age_ms).
+
+        Position/confidence are track-smoothed, not the last raw
+        sighting. Most hits wins; ties break by recency.
+        """
+        tracks = self.locate_all(name, t_now)
+        if not tracks:
+            return None
+        tr = tracks[0]
+        return (tr.x, tr.y, tr.conf, tr.age(t_now))
+
+    def locate_all(self, name: str, t_now: float) -> list[Track]:
+        """All live tracks of `name`, best first (hits, then recency)."""
         want = _normalize_name(name)
-        best = None
-        for label, mx, my, t, conf in reversed(self.sightings):
-            if _normalize_name(label) != want:
-                continue
-            age = t_now - t
-            if age < 0 or age > self.max_age_ms:
-                continue
-            best = (mx, my, conf, age)
-            break
-        return best
+        cands = [tr for tr in self._live_tracks(t_now)
+                 if _normalize_name(tr.label) == want]
+        cands.sort(key=lambda tr: (tr.hits, tr.last_t), reverse=True)
+        return cands
 
     def last_seen(self, name: str):
         """Most recent sighting regardless of age: (map_x, map_y, conf)."""

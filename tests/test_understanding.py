@@ -549,8 +549,8 @@ def test_object_memory_locate_most_recent():
     mem.add("gate", 10.0, 10.0, t_ms=2000.0, conf=0.9)
     mem.add("windows", 42.0, 22.0, t_ms=3000.0, conf=0.7)
     mx, my, conf, age = mem.locate("the windows", t_now=4000.0)
-    assert (mx, my) == (42.0, 22.0)
-    assert conf == 0.7 and age == 1000.0
+    assert (mx, my) == (41.0, 21.0)  # track-smoothed, not raw last
+    assert conf == 0.75 and age == 1000.0
     assert mem.locate("car", t_now=4000.0) is None
 
 
@@ -637,3 +637,40 @@ def test_look_at_with_trailing_narration_grounds():
     assert "windows" in reply and bias is not None
     iy, ix = divmod(bias.argmax(), 56)
     assert (ix, iy) == (40, 20)
+
+
+def test_track_associates_nearby_sightings():
+    mem = ObjectMemory()
+    mem.add("gate", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("gate", 42.0, 21.0, t_ms=2000.0, conf=0.6)  # near -> same track
+    mem.add("gate", 10.0, 50.0, t_ms=3000.0, conf=0.7)  # far -> new track
+    assert len(mem.tracks) == 2
+    tr = mem.locate_all("gate", 4000.0)[0]
+    assert tr.hits == 2  # the nearby pair wins on hits
+
+
+def test_track_smooths_position():
+    mem = ObjectMemory()
+    mem.add("windows", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("windows", 44.0, 20.0, t_ms=2000.0, conf=0.8)
+    x, y, conf, age = mem.locate("windows", 2500.0)
+    assert x == 42.0  # EMA with smooth=0.5, not the raw last sighting
+    assert age == 500.0
+
+
+def test_track_expiry():
+    mem = ObjectMemory(max_age_ms=1000.0)
+    mem.add("gate", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    assert mem.locate("gate", 1500.0) is not None
+    assert mem.locate("gate", 2500.0) is None
+    assert mem.locate_all("gate", 2500.0) == []
+
+
+def test_locate_prefers_hits_over_recency():
+    mem = ObjectMemory()
+    mem.add("dark", 5.0, 5.0, t_ms=1000.0, conf=0.5)
+    mem.add("dark", 6.0, 5.0, t_ms=2000.0, conf=0.5)
+    mem.add("dark", 6.0, 6.0, t_ms=3000.0, conf=0.5)
+    mem.add("dark", 50.0, 50.0, t_ms=4000.0, conf=0.9)  # newer, 1 hit
+    x, y, conf, age = mem.locate("dark", 4500.0)
+    assert (x, y) != (50.0, 50.0)  # 3-hit track wins over newer 1-hit
