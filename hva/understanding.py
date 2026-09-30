@@ -389,6 +389,66 @@ def extract_referent(text: str) -> str | None:
     return m.group(1).strip() or None
 
 
+_SPATIAL_SELECTORS = ("leftmost", "rightmost", "topmost", "uppermost",
+                      "bottommost", "lowermost", "nearest", "closest",
+                      "farthest", "furthest")
+
+
+def split_spatial(candidate: str
+                ) -> tuple[str | None, str]:
+    """Split a spatial selector off a referent.
+
+    'leftmost windows' -> ('leftmost', 'windows');
+    'the windows on the left' -> ('left', 'windows').
+    No selector -> (None, candidate).
+    """
+    norm = _normalize(candidate)
+    if norm.startswith("the "):
+        norm = norm[4:]
+    words = norm.split()
+    if words and words[0] in _SPATIAL_SELECTORS:
+        return words[0], " ".join(words[1:]).strip()
+    m = re.search(r"\b(?:on the|at the|in the)\s+"
+                  r"(left|right|top|upper|bottom|lower|middle|center)"
+                  r"\s*$", norm)
+    if m:
+        return m.group(1), norm[:m.start()].strip()
+    return None, candidate
+
+
+def resolve_spatial_referent(name: str, spatial: str,
+                             memory: "ObjectMemory", t_now: float,
+                             gaze_xy: tuple[float, float] | None = None):
+    """Pick one track of `name` by a spatial selector.
+
+    Map coords: x 0=left 56=right, y 0=top 56=bottom. 'nearest' is
+    measured from the current gaze (frame center when unknown).
+    Returns (track, matched_name); (None, name) when nothing matches.
+    """
+    tracks = memory.locate_all(name, t_now)
+    if not tracks:
+        return None, name
+    gx, gy = gaze_xy if gaze_xy is not None else (28.0, 28.0)
+    if spatial in ("leftmost", "left"):
+        pick = min(tracks, key=lambda tr: tr.x)
+    elif spatial in ("rightmost", "right"):
+        pick = max(tracks, key=lambda tr: tr.x)
+    elif spatial in ("topmost", "uppermost", "top", "upper"):
+        pick = min(tracks, key=lambda tr: tr.y)
+    elif spatial in ("bottommost", "lowermost", "bottom", "lower"):
+        pick = max(tracks, key=lambda tr: tr.y)
+    elif spatial in ("nearest", "closest"):
+        pick = min(tracks,
+                   key=lambda tr: (tr.x - gx) ** 2 + (tr.y - gy) ** 2)
+    elif spatial in ("farthest", "furthest"):
+        pick = max(tracks,
+                   key=lambda tr: (tr.x - gx) ** 2 + (tr.y - gy) ** 2)
+    else:  # "middle" / "center"
+        pick = min(tracks,
+                   key=lambda tr: (tr.x - 28.0) ** 2 + (tr.y - 28.0) ** 2)
+    return pick, name
+
+
 def resolve_referent(candidate: str, memory: "ObjectMemory",
                      t_now: float):
     """Match a referent against memory, tolerating trailing narration.
@@ -436,13 +496,15 @@ def understand(turn_text: str,
                perceptual: PerceptualState | None = None,
                dialogue: DialogueState | None = None,
                memory: ObjectMemory | None = None,
-               t_now_ms: float = 0.0
+               t_now_ms: float = 0.0,
+               gaze_xy: tuple[float, float] | None = None,
                ) -> tuple[str, str | None]:
     """Classify and respond. Returns (response_text, task_bias|None).
 
     task_bias is a 56x56 array for the perception loop, or None.
     memory is the ObjectMemory the loop feeds; t_now_ms anchors
-    sighting ages.
+    sighting ages; gaze_xy is the current fixation in map coords
+    (for 'nearest'/'farthest').
     """
     intent = classify(turn_text)
     bias = None
@@ -474,9 +536,20 @@ def understand(turn_text: str,
     elif intent == Intent.LOOK_AT:
         referent = extract_referent(turn_text)
         sighting, matched = None, referent
+        spatial_word = None
         if memory is not None and referent:
-            sighting, matched = resolve_referent(referent, memory,
-                                                 t_now_ms)
+            spatial_word, name = split_spatial(referent)
+            if spatial_word:
+                track, matched = resolve_spatial_referent(
+                    name, spatial_word, memory, t_now_ms, gaze_xy)
+                if track is not None:
+                    sighting = (track.x, track.y, track.conf,
+                                track.age(t_now_ms))
+                    matched = ((spatial_word + " " + matched).strip()
+                               or matched)
+            else:
+                sighting, matched = resolve_referent(referent, memory,
+                                                     t_now_ms)
         if sighting is not None:
             mx, my, conf, age = sighting
             bias = object_bias(mx, my, strength=1.2 * conf)

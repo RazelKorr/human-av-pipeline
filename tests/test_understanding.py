@@ -11,6 +11,7 @@ sys.path.insert(0, REPO)
 from hva.understanding import (  # noqa: E402
     Intent, classify, look_direction, direction_bias,
     PerceptualState, DialogueState, understand,
+    ObjectMemory, split_spatial, resolve_spatial_referent,
 )
 from hva.conversation import Turn  # noqa: E402
 
@@ -674,3 +675,64 @@ def test_locate_prefers_hits_over_recency():
     mem.add("dark", 50.0, 50.0, t_ms=4000.0, conf=0.9)  # newer, 1 hit
     x, y, conf, age = mem.locate("dark", 4500.0)
     assert (x, y) != (50.0, 50.0)  # 3-hit track wins over newer 1-hit
+
+
+def test_split_spatial_prefix():
+    assert split_spatial("leftmost windows") == ("leftmost", "windows")
+    assert split_spatial("the nearest gate") == ("nearest", "gate")
+
+
+def test_split_spatial_suffix():
+    assert split_spatial("the windows on the left") == ("left", "windows")
+    assert split_spatial("gate at the top") == ("top", "gate")
+    assert split_spatial("the gate") == (None, "the gate")
+
+
+def test_spatial_leftmost_rightmost():
+    mem = ObjectMemory()
+    mem.add("windows", 10.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("windows", 45.0, 20.0, t_ms=2000.0, conf=0.8)
+    left, _ = resolve_spatial_referent("windows", "leftmost", mem, 3000.0)
+    right, _ = resolve_spatial_referent("windows", "rightmost", mem, 3000.0)
+    assert left.x < right.x
+    assert left.x == 10.0 and right.x == 45.0
+
+
+def test_spatial_on_the_left_suffix():
+    mem = ObjectMemory()
+    mem.add("windows", 10.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("windows", 45.0, 20.0, t_ms=2000.0, conf=0.8)
+    pick, _ = resolve_spatial_referent("windows", "left", mem, 3000.0)
+    assert pick.x == 10.0
+
+
+def test_spatial_nearest_uses_gaze():
+    mem = ObjectMemory()
+    mem.add("gate", 5.0, 5.0, t_ms=1000.0, conf=0.8)
+    mem.add("gate", 50.0, 50.0, t_ms=2000.0, conf=0.8)
+    near, _ = resolve_spatial_referent("gate", "nearest", mem, 3000.0,
+                                       gaze_xy=(48.0, 48.0))
+    assert near.x == 50.0
+    far, _ = resolve_spatial_referent("gate", "farthest", mem, 3000.0,
+                                      gaze_xy=(48.0, 48.0))
+    assert far.x == 5.0
+
+
+def test_spatial_miss_stays_honest():
+    reply, bias = understand("look at the leftmost red car",
+                             memory=ObjectMemory(), t_now_ms=1000.0)
+    assert bias is None
+    assert "don't know" in reply
+
+
+def test_spatial_grounded_reply():
+    mem = ObjectMemory()
+    mem.add("windows", 45.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("windows", 10.0, 20.0, t_ms=2000.0, conf=0.8)
+    reply, bias = understand("look at the leftmost windows",
+                             memory=mem, t_now_ms=3000.0)
+    assert bias is not None
+    assert "leftmost windows" in reply
+    # bias peaks at the left track
+    peak = bias.argmax()
+    assert peak % 56 < 28

@@ -185,11 +185,16 @@ class ResponsePolicy:
             except Exception as e:  # API failure -> rule fallback
                 print(f"[policy] LLM failed ({e}); using rule fallback",
                       flush=True)
+        gaze = None
+        if self.perceptual is not None:
+            gx, gy = self.perceptual.gaze_now()
+            gaze = (gx / 4.0, gy / 4.0)
         reply, bias = understand(turn.text,
                                  perceptual=self.perceptual,
                                  dialogue=self.dialogue,
                                  memory=self.memory,
-                                 t_now_ms=turn.t_end * 1000.0)
+                                 t_now_ms=turn.t_end * 1000.0,
+                                 gaze_xy=gaze)
         self.pending_bias = bias
         return reply
 
