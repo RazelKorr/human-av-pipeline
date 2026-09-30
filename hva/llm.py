@@ -110,6 +110,62 @@ class LocalGenerator:
         return data["choices"][0]["message"]["content"].strip()
 
 
+class HFGenerator:
+    """HuggingFace Inference Providers backend (OpenAI-compatible).
+
+    Free tier: create an account at huggingface.co, generate a token
+    at huggingface.co/settings/tokens with "Make calls to Inference
+    Providers" permission, and export HF_TOKEN. No key / API error ->
+    falls back to the rule-based understand(), same as the other
+    backends. The rules are the floor; the hosted model is the ceiling.
+
+    Default model is Qwen/Qwen3-8B -- the same family docs/local-llm.md
+    recommends for the eventual local install, so hosted results
+    transfer to the local weights later.
+    """
+
+    ROUTER_URL = "https://router.huggingface.co/v1/chat/completions"
+
+    def __init__(self, api_token: str | None = None,
+                 model: str = "Qwen/Qwen3-8B",
+                 timeout: float = 60.0):
+        self.api_token = api_token or os.environ.get("HF_TOKEN")
+        self.model = model
+        self.timeout = timeout
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_token)
+
+    def generate(self, payload: dict) -> str:
+        """Returns reply text (with any LOOK line still attached)."""
+        if not self.available:
+            raise RuntimeError("no HF_TOKEN")
+        body = json.dumps({
+            "model": self.model,
+            "max_tokens": 200,
+            "temperature": 0.6,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",
+                 "content": ("Perceptual snapshot and dialogue:\n"
+                             + json.dumps(payload, indent=1)
+                             + "\n\nRespond to the turn.")},
+            ],
+        }).encode()
+        req = urllib.request.Request(
+            self.ROUTER_URL,
+            data=body,
+            headers={
+                "content-type": "application/json",
+                "authorization": f"Bearer {self.api_token}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            data = json.loads(resp.read().decode())
+        return data["choices"][0]["message"]["content"].strip()
+
+
 class ApiGenerator:
     """Anthropic Messages API backend for the generate() seam."""
 
@@ -160,16 +216,18 @@ class ApiGenerator:
 
 def select_llm_backend(choice: str = "none",
                        llm_url: str = "http://localhost:8080",
-                       api_model: str = "claude-haiku-4-5-20251001"):
+                       api_model: str = "claude-haiku-4-5-20251001",
+                       hf_model: str = "Qwen/Qwen3-8B"):
     """Pick an LLM backend for ResponsePolicy.
 
     Returns (backend_or_None, description). Rule-based understand() is
     always the fallback; the backend is the ceiling. Default is "none"
-    so a stray ANTHROPIC_API_KEY never spends money without an explicit
-    flag.
+    so a stray ANTHROPIC_API_KEY or HF_TOKEN never spends money or
+    quota without an explicit flag.
 
-    choice: "none" | "api" | "local" | "auto"
-      auto tries local llama-server first, then API if keyed, else none.
+    choice: "none" | "api" | "local" | "hf" | "auto"
+      auto tries local llama-server first, then HuggingFace (free tier)
+      if tokened, then API if keyed, else none.
     """
     if choice == "none":
         return None, "none (rule-based)"
@@ -178,16 +236,25 @@ def select_llm_backend(choice: str = "none",
         return (gen if gen.available else None,
                 f"local @ {llm_url} "
                 f"({'reachable' if gen.available else 'unreachable, fallback'})")
+    if choice == "hf":
+        gen = HFGenerator(model=hf_model)
+        return (gen if gen.available else None,
+                f"hf {hf_model} "
+                f"({'tokened' if gen.available else 'no token, fallback'})")
     if choice == "api":
         gen = ApiGenerator(model=api_model)
         return (gen if gen.available else None,
                 f"api {api_model} "
                 f"({'keyed' if gen.available else 'no key, fallback'})")
-    # auto: local if reachable, else api if keyed, else none
+    # auto: local if reachable, else hf if tokened, else api if keyed,
+    # else none. Free before paid.
     local = LocalGenerator(base_url=llm_url)
     if local.available:
         return local, f"auto -> local @ {llm_url}"
+    hf = HFGenerator(model=hf_model)
+    if hf.available:
+        return hf, f"auto -> hf {hf_model}"
     api = ApiGenerator(model=api_model)
     if api.available:
         return api, f"auto -> api {api_model}"
-    return None, "auto -> none (no local server, no API key)"
+    return None, "auto -> none (no local server, no HF token, no API key)"

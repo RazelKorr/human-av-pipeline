@@ -54,15 +54,19 @@ def main():
                     help="transcription window s (smaller = more responsive)")
     ap.add_argument("--tx-step", type=float, default=3.0)
     ap.add_argument("--llm", default="none",
-                    choices=["none", "api", "local", "auto"],
+                    choices=["none", "api", "local", "hf", "auto"],
                     help="language-model backend for ResponsePolicy: "
                          "none=rule-based only, api=Anthropic (needs "
                          "ANTHROPIC_API_KEY), local=llama-server at --llm-url, "
-                         "auto=local if reachable else api if keyed else none")
+                         "hf=HuggingFace Inference (needs HF_TOKEN, free tier), "
+                         "auto=local if reachable else hf if tokened else "
+                         "api if keyed else none")
     ap.add_argument("--llm-url", default="http://localhost:8080",
                     help="base URL for the local llama-server backend")
     ap.add_argument("--api-model", default="claude-haiku-4-5-20251001",
                     help="Anthropic model id for --llm api/auto")
+    ap.add_argument("--hf-model", default="Qwen/Qwen3-8B",
+                    help="HuggingFace model id for --llm hf/auto")
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -82,7 +86,7 @@ def main():
     # --- LLM backend selection (the seam is real now) ---
     from hva.llm import select_llm_backend
     llm_backend, llm_desc = select_llm_backend(
-        args.llm, args.llm_url, args.api_model)
+        args.llm, args.llm_url, args.api_model, args.hf_model)
     policy.llm = llm_backend
     print(f"[llm] backend: {llm_desc}", flush=True)
 

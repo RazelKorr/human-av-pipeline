@@ -310,9 +310,10 @@ def test_select_llm_backend_auto_prefers_local(monkeypatch):
 
 
 def test_select_llm_backend_auto_falls_to_api(monkeypatch):
-    """auto -> api when local unreachable but key is set."""
+    """auto -> api when local unreachable, no HF token, but key is set."""
     from hva.llm import select_llm_backend, ApiGenerator
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     backend, desc = select_llm_backend(
         "auto", llm_url="http://localhost:9")
     assert isinstance(backend, ApiGenerator)
@@ -329,12 +330,95 @@ def test_select_llm_backend_local_unreachable():
     assert "unreachable" in desc
 
 
-def test_select_llm_backend_auto_fallback():
-    """auto with no server and no key -> None."""
+def test_select_llm_backend_auto_fallback(monkeypatch):
+    """auto with no server and no key/token -> None."""
     from hva.llm import select_llm_backend
-    import os
-    os.environ.pop("ANTHROPIC_API_KEY", None)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     backend, desc = select_llm_backend(
         "auto", llm_url="http://localhost:9")
     assert backend is None
     assert "none" in desc
+
+
+def test_select_llm_backend_hf_no_token(monkeypatch):
+    """hf without token -> None, fallback described."""
+    from hva.llm import select_llm_backend
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    backend, desc = select_llm_backend("hf")
+    assert backend is None
+    assert "no token" in desc
+
+
+def test_select_llm_backend_hf_with_token(monkeypatch):
+    """hf with token -> HFGenerator, tokened (deterministic)."""
+    from hva.llm import select_llm_backend, HFGenerator
+    monkeypatch.setenv("HF_TOKEN", "hf-test-fake-token")
+    backend, desc = select_llm_backend("hf", hf_model="Qwen/Qwen3-8B")
+    assert backend is not None
+    assert isinstance(backend, HFGenerator)
+    assert backend.api_token == "hf-test-fake-token"
+    assert backend.model == "Qwen/Qwen3-8B"
+    assert "tokened" in desc
+
+
+def test_hf_generator_generate_mocked(monkeypatch):
+    """HFGenerator.generate parses the OpenAI-style response."""
+    import json
+    import urllib.request
+    from hva.llm import HFGenerator
+
+    captured = {}
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({
+                "choices": [{"message": {
+                    "content": "I see you looking left.\nLOOK: left"}}]
+            }).encode()
+
+    def fake_urlopen(req, timeout=60.0):
+        captured["url"] = req.full_url
+        captured["auth"] = req.headers.get("Authorization")
+        captured["body"] = json.loads(req.data.decode())
+        return FakeResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    gen = HFGenerator(api_token="hf-test-fake-token")
+    assert gen.available
+    reply = gen.generate({"turn": "what do you see?"})
+    assert reply == "I see you looking left.\nLOOK: left"
+    assert captured["url"] == \
+        "https://router.huggingface.co/v1/chat/completions"
+    assert captured["auth"] == "Bearer hf-test-fake-token"
+    assert captured["body"]["model"] == "Qwen/Qwen3-8B"
+    roles = [m["role"] for m in captured["body"]["messages"]]
+    assert roles == ["system", "user"]
+
+
+def test_hf_generator_generate_no_token():
+    """HFGenerator.generate without token raises instead of calling."""
+    from hva.llm import HFGenerator
+    import os
+    os.environ.pop("HF_TOKEN", None)
+    gen = HFGenerator(api_token=None)
+    assert not gen.available
+    try:
+        gen.generate({"turn": "hi"})
+    except RuntimeError as e:
+        assert "HF_TOKEN" in str(e)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_select_llm_backend_auto_prefers_hf_over_api(monkeypatch):
+    """auto -> hf when local is down, HF tokened, API keyed (free first)."""
+    from hva.llm import select_llm_backend, HFGenerator
+    monkeypatch.setenv("HF_TOKEN", "hf-test-fake-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    backend, desc = select_llm_backend(
+        "auto", llm_url="http://localhost:9")
+    assert isinstance(backend, HFGenerator)
+    assert "auto -> hf" in desc

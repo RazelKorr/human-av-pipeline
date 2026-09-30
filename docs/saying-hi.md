@@ -58,8 +58,11 @@ what the transcriber hasn't produced yet.
 live loop with `policy.perceptual = PerceptualState(loop)`; "look"
 biases land on `policy.pending_bias` for the tick loop to collect with
 `take_bias()`. `generate(turn)` is the LLM seam: attach `ApiGenerator`
-(Anthropic API, needs `ANTHROPIC_API_KEY`) or `LocalGenerator`
-(llama-server at `--llm-url`) via `--llm {none,api,local,auto}`.
+(Anthropic API, needs `ANTHROPIC_API_KEY`), `HFGenerator` (HuggingFace
+Inference Providers, needs `HF_TOKEN`, free tier, default model
+`Qwen/Qwen3-8B`), or `LocalGenerator` (llama-server at `--llm-url`)
+via `--llm {none,api,local,hf,auto}` (`--hf-model` overrides the HF
+model). `auto` tries local, then HF, then API — free before paid.
 A trailing `LOOK: <direction>` line in the LLM reply is stripped before
 speaking and converted to a task bias. No backend or API failure falls
 back to the rule-based `understand()`.
