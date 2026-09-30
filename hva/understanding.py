@@ -21,9 +21,12 @@ Components:
       -> (intent, entities, response_text, task_bias|None).
 
 Honest limits, stated plainly:
-  - No object recognition. "Look at the red car" gets "I don't know
-    what a red car looks like yet" -- the bias channel needs a target
-    the system can locate, and right now that's directions, not things.
+  - Object recognition exists but is narrow: zero-shot CLIP over a
+    small vocabulary (hvp/recognize.py), 6/12 top-1 on the hand-labeled
+    dark-scene set. "Look at the red car" when no car has been seen
+    gets "I don't know what a red car looks like yet" plus the list of
+    things actually recognized so far. Out-of-vocabulary objects are
+    invisible by name.
   - No deep semantics. The intents are patterns, not understanding.
     The module reports what it did ("I looked left because you said
     left"), it does not pretend to grasp meaning.
@@ -193,6 +196,13 @@ _DIRECTION_XY = {
 }
 
 
+def _gaussian_blob(cx: float, cy: float, strength: float = 1.0,
+                   sigma: float = 8.0) -> np.ndarray:
+    yy, xx = np.mgrid[0:MAP, 0:MAP].astype(np.float32)
+    blob = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sigma ** 2))
+    return (strength * blob).astype(np.float32)
+
+
 def direction_bias(direction: str, strength: float = 1.0,
                    sigma: float = 8.0) -> np.ndarray:
     """A Gaussian bias blob on the 56x56 map for a look command.
@@ -203,9 +213,88 @@ def direction_bias(direction: str, strength: float = 1.0,
     with the map -- a command is a nudge, not a clamp.
     """
     cx, cy = _DIRECTION_XY[direction]
-    yy, xx = np.mgrid[0:MAP, 0:MAP].astype(np.float32)
-    blob = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sigma ** 2))
-    return (strength * blob).astype(np.float32)
+    return _gaussian_blob(cx, cy, strength, sigma)
+
+
+def object_bias(map_x: float, map_y: float, strength: float = 1.2,
+                sigma: float = 8.0) -> np.ndarray:
+    """A Gaussian bias blob at a recognized object's map location.
+
+    Same channel as direction_bias -- "look at the windows" steers
+    gaze to where windows were last seen, through the same machinery.
+    """
+    return _gaussian_blob(map_x, map_y, strength, sigma)
+
+
+# ------------------------------------------------------ object memory
+
+class ObjectMemory:
+    """What the eyes have recognized, and where.
+
+    The perceptual loop records (label, map_x, map_y, t_ms, conf) each
+    time the foveal classifier fires; language resolves "look at the X"
+    against the most recent confident sighting. Out-of-vocabulary or
+    never-seen objects simply aren't here -- the honest miss.
+    """
+
+    def __init__(self, max_sightings: int = 200,
+                 min_conf: float = 0.30, max_age_ms: float = 60000.0):
+        self.sightings: list[tuple[str, float, float, float, float]] = []
+        self.max_sightings = max_sightings
+        self.min_conf = min_conf
+        self.max_age_ms = max_age_ms
+
+    def add(self, label: str, map_x: float, map_y: float,
+            t_ms: float, conf: float):
+        if label == "unknown" or conf < self.min_conf:
+            return
+        self.sightings.append((label, map_x, map_y, t_ms, conf))
+        self.sightings = self.sightings[-self.max_sightings:]
+
+    def locate(self, name: str, t_now: float
+               ) -> tuple[float, float, float, float] | None:
+        """Most recent sighting of `name`: (map_x, map_y, conf, age_ms)."""
+        want = _normalize_name(name)
+        best = None
+        for label, mx, my, t, conf in reversed(self.sightings):
+            if _normalize_name(label) != want:
+                continue
+            age = t_now - t
+            if age < 0 or age > self.max_age_ms:
+                continue
+            best = (mx, my, conf, age)
+            break
+        return best
+
+    def known_objects(self) -> list[str]:
+        """Labels seen, most recent first, deduplicated."""
+        seen: list[str] = []
+        for label, *_ in reversed(self.sightings):
+            if label not in seen:
+                seen.append(label)
+        return seen
+
+
+def _normalize_name(name: str) -> str:
+    """'the windows' -> 'window'; naive singularization for matching.
+
+    Spaces are dropped too: the vocabulary's 'light-strip' normalizes
+    to 'lightstrip', matching speech's 'light strip'.
+    """
+    n = _normalize(name).strip()
+    n = re.sub(r"^(the|a|an)\s+", "", n)
+    if n.endswith("s") and not n.endswith("ss"):
+        n = n[:-1]
+    return n.replace(" ", "")
+
+
+def extract_referent(text: str) -> str | None:
+    """Pull the X out of 'look at (the) X' / 'look toward (the) X'."""
+    m = re.search(r"\blook\s+(?:at|toward(?:s)?)\s+(?:the\s+|a\s+|an\s+)?"
+                  r"(.+?)(?:\s+please)?\s*$", _normalize(text))
+    if not m:
+        return None
+    return m.group(1).strip() or None
 
 
 # ---------------------------------------------------------- dialogue
@@ -235,11 +324,15 @@ class DialogueState:
 
 def understand(turn_text: str,
                perceptual: PerceptualState | None = None,
-               dialogue: DialogueState | None = None
+               dialogue: DialogueState | None = None,
+               memory: ObjectMemory | None = None,
+               t_now_ms: float = 0.0
                ) -> tuple[str, str | None]:
     """Classify and respond. Returns (response_text, task_bias|None).
 
     task_bias is a 56x56 array for the perception loop, or None.
+    memory is the ObjectMemory the loop feeds; t_now_ms anchors
+    sighting ages.
     """
     intent = classify(turn_text)
     bias = None
@@ -269,9 +362,25 @@ def understand(turn_text: str,
             dialogue.last_region = direction
         reply = f"Looking {direction}."
     elif intent == Intent.LOOK_AT:
-        reply = ("I don't know what things look like yet -- I can look "
-                 "left, right, up, down, or center, but I can't find "
-                 "objects by name.")
+        referent = extract_referent(turn_text)
+        sighting = (memory.locate(referent, t_now_ms)
+                    if memory is not None and referent else None)
+        if sighting is not None:
+            mx, my, conf, age = sighting
+            bias = object_bias(mx, my, strength=1.2 * conf)
+            where = _qualitative(mx * 4.0, my * 4.0)
+            if dialogue is not None:
+                dialogue.last_region = referent
+            reply = (f"Looking at the {referent} -- I saw it {where}.")
+        else:
+            known = memory.known_objects() if memory is not None else []
+            if referent:
+                reply = (f"I don't know what a {referent} looks like yet")
+            else:
+                reply = "I couldn't tell what you want me to look at"
+            if known:
+                reply += f" -- so far I've recognized: {', '.join(known)}"
+            reply += "."
     elif intent == Intent.THANKS:
         reply = "You're welcome."
     elif intent in (Intent.YESNO_QUESTION, Intent.WH_QUESTION):

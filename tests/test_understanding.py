@@ -79,7 +79,7 @@ def test_understand_look_command_returns_bias():
 def test_understand_look_at_is_honest():
     reply, bias = understand("wodehaus look at the red car")
     assert bias is None
-    assert "don't know what things look like" in reply
+    assert "don't know what a red car looks like" in reply
 
 
 def test_understand_see_question_uses_perception():
@@ -520,3 +520,94 @@ def test_select_llm_backend_auto_prefers_hf_over_api(monkeypatch):
         "auto", llm_url="http://localhost:9")
     assert isinstance(backend, HFGenerator)
     assert "auto -> hf" in desc
+
+
+# --------------------------------------------- referring-expression tests
+
+from hva.understanding import (  # noqa: E402
+    ObjectMemory, extract_referent, object_bias, _normalize_name,
+)
+
+
+def test_normalize_name():
+    assert _normalize_name("the windows") == "window"
+    assert _normalize_name("a gate") == "gate"
+    assert _normalize_name("light strip") == "lightstrip"  # label: light-strip
+    assert _normalize_name("gate edge") == "gateedge"
+
+
+def test_extract_referent():
+    assert extract_referent("wodehaus look at the windows") == "windows"
+    assert extract_referent("look at a red car please") == "red car"
+    assert extract_referent("look toward the gate") == "gate"
+    assert extract_referent("look left") is None
+
+
+def test_object_memory_locate_most_recent():
+    mem = ObjectMemory()
+    mem.add("windows", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("gate", 10.0, 10.0, t_ms=2000.0, conf=0.9)
+    mem.add("windows", 42.0, 22.0, t_ms=3000.0, conf=0.7)
+    mx, my, conf, age = mem.locate("the windows", t_now=4000.0)
+    assert (mx, my) == (42.0, 22.0)
+    assert conf == 0.7 and age == 1000.0
+    assert mem.locate("car", t_now=4000.0) is None
+
+
+def test_object_memory_rejects_unknown_and_low_conf():
+    mem = ObjectMemory()
+    mem.add("unknown", 1.0, 1.0, t_ms=1000.0, conf=0.9)
+    mem.add("gate", 1.0, 1.0, t_ms=1000.0, conf=0.1)
+    assert mem.known_objects() == []
+    assert mem.locate("gate", t_now=2000.0) is None
+
+
+def test_object_memory_expiry():
+    mem = ObjectMemory(max_age_ms=5000.0)
+    mem.add("gate", 10.0, 10.0, t_ms=1000.0, conf=0.9)
+    assert mem.locate("gate", t_now=20000.0) is None  # too old
+    assert mem.locate("gate", t_now=3000.0) is not None
+
+
+def test_object_bias_targets_sighting():
+    b = object_bias(40.0, 20.0)
+    assert b.shape == (56, 56)
+    iy, ix = divmod(b.argmax(), 56)
+    assert (ix, iy) == (40, 20)
+
+
+def test_look_at_grounded():
+    mem = ObjectMemory()
+    mem.add("windows", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    reply, bias = understand("wodehaus look at the windows",
+                             memory=mem, t_now_ms=2000.0)
+    assert "windows" in reply
+    assert bias is not None and bias.shape == (56, 56)
+    iy, ix = divmod(bias.argmax(), 56)
+    assert (ix, iy) == (40, 20)
+
+
+def test_look_at_grounded_plural():
+    mem = ObjectMemory()
+    mem.add("gate", 10.0, 30.0, t_ms=1000.0, conf=0.9)
+    reply, bias = understand("look at the gates", memory=mem,
+                             t_now_ms=2000.0)
+    assert bias is not None  # 'gates' -> 'gate'
+    assert "gate" in reply
+
+
+def test_look_at_ungrounded_lists_known():
+    mem = ObjectMemory()
+    mem.add("windows", 40.0, 20.0, t_ms=1000.0, conf=0.8)
+    mem.add("gate", 10.0, 10.0, t_ms=2000.0, conf=0.9)
+    reply, bias = understand("wodehaus look at the red car",
+                             memory=mem, t_now_ms=3000.0)
+    assert bias is None
+    assert "red car" in reply
+    assert "windows" in reply and "gate" in reply
+
+
+def test_look_at_no_memory_honest():
+    reply, bias = understand("wodehaus look at the red car")
+    assert bias is None
+    assert "red car" in reply
