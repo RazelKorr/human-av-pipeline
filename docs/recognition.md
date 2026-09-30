@@ -30,16 +30,18 @@ why, what it costs, and what it still cannot do.
 
 ## What it is not
 
-- Not general object detection: no bounding boxes, no segmentation.
-- Not tracking: sightings are per-fixation; `ObjectMemory` keeps
-  the last sighting per label for 60 s, nothing more.
-- Not open-world: out-of-vocabulary objects are invisible by name.
+- Not general object detection in the loop: the 10 Hz path still
+  classifies fixated crops. Boxes exist only via the on-demand
+  OWL-ViT fallback (`hvp/detect.py`), ~2 s per frame on CPU.
+- Not open-world: out-of-vocabulary objects are invisible by name to
+  the classifier; the detector takes free-text queries but was only
+  audited on "a window".
   `GENERAL_VOCAB` is a 20-word starter list, unaudited.
 - Not validated human-equivalent recognition. The audit is 12 crops
   from one dark scene. Say "6/12 on the dark-scene set", not
   "it recognizes objects".
 - No color grounding, no speaker/source identity, no size/distance
-  beyond the qualitative region words.
+  beyond the qualitative region words and relative track selectors.
 
 ## Alternatives considered
 
@@ -49,14 +51,14 @@ why, what it costs, and what it still cannot do.
 - **Smaller CLIP variants (RN50, ViT-B/16):** same family, same
   interface; ViT-B/16 is slower per crop (4x the patches), RN50
   untested in this loop. Not worth the swap now.
-- **Detector-based (YOLOv8, DETR, OWL-ViT):** the honest upgrade
-  path. A detector returns boxes natively, which is what "where is
-  the X" actually wants -- our current grounding classifies the
-  *fixated* crop, so an object is only nameable after gaze has
-  already found it. Fixed-vocabulary detectors (COCO 80) trade the
-  zero-shot phrasing away; open-vocabulary detectors (OWL-ViT) keep
-  it but cost more per frame. Deferred: heavier deps, and the crop
-  seam was the fastest honest step.
+- **Detector-based (YOLOv8, DETR, OWL-ViT):** was the honest
+  upgrade path; built 2026-09-30 with OWL-ViT
+  (`google/owlvit-base-patch32`, `hvp/detect.py`). Open-vocabulary
+  like the CLIP pick, ~2 s/frame CPU, on-demand only: "where is the
+  X" / "find the X" with no track scans the current frame, best box
+  gets the gaze bias, >= 0.30 conf also becomes a track. Fixed-vocab
+  detectors (COCO 80) were skipped -- they trade the zero-shot
+  phrasing away.
 - **Caption/VLM (BLIP-2, LLaVA):** richer descriptions, but
   autoregressive decoding per crop is much slower on this CPU than
   one contrastive forward pass (not benchmarked here -- estimate),
@@ -72,11 +74,21 @@ why, what it costs, and what it still cannot do.
 frame -> foveal crop (96x96 @ fixation, 2x upscale)
       -> FovealClassifier (CLIP zero-shot, vocab-bound, unknown<0.30)
       -> ObjectMemory.add(label, map_x, map_y, t, conf)
+          -> Track association: same label within 10 map-px / 60 s
+             joins one Track; position/conf are EMA-smoothed (0.5)
       -> (a) live_recognizer: conf-scaled task bias in run_video_topdown
-      -> (b) "look at the X": locate() -> object_bias() at the sighting
-      -> (c) "what do you see?": PerceptualState.describe() names objects
-      -> (d) ResponsePolicy: memory + t_now on every turn; LLM payload
-          inherits objects via describe()
+      -> (b) "look at the X": locate() -> object_bias() at the track
+      -> (c) "the leftmost X" / "X on the right": split_spatial() +
+             resolve_spatial_referent() pick among the label's tracks
+             (min/max x/y, nearest/farthest from gaze, nearest center)
+      -> (d) "where is the X" / "find the X" with no track:
+             ObjectDetector (OWL-ViT, on-demand, ~2 s CPU) scans the
+             current frame; best box -> bias + "Found the X";
+             >= 0.30 conf also becomes a track
+      -> (e) "what do you see?": PerceptualState.describe() names objects
+      -> (f) ResponsePolicy: memory + t_now + gaze on every turn;
+             policy.detector + policy.frame_fn wire the detection
+             fallback; LLM payload inherits objects via describe()
 ```
 
 ## Audits
@@ -114,6 +126,35 @@ frame -> foveal crop (96x96 @ fixation, 2x upscale)
      arrived in a separate Whisper segment from its "Hey, WooTouse",
      so that turn fired as a greeting -- pre-existing turn
      segmentation behavior, not a recognition failure.
+5. **Tracking** (`scripts/audit_tracking.py`, replays the 90
+   live-run sightings): 90 sightings -> 28 tracks; gate collapses
+   18 -> 2 (one 17-hit track + one stray); `locate()` returns the
+   EMA-smoothed position, never the last raw sighting.
+6. **Spatial references** (`scripts/audit_spatial.py`, live-run
+   tracks): "look at the leftmost windows" peaks the bias at the
+   left window track; "the windows on the right" at the righter of
+   the two tracks (selectors are relative among tracks, not absolute
+   frame halves); "the nearest gate" from a gaze near the gate hits
+   the gate track; "the leftmost red car" -> honest miss, no bias.
+7. **On-demand detection** (`scripts/audit_detect.py`, real OWL-ViT
+   weights, CPU): with an empty memory, "wodehaus where is the
+   window" on a windows crop -> 5 boxes, top 0.215 ->
+   "Found the window -- looking at it center.", bias peak (27,27)
+   at the box center; the 0.215 detection is below the 0.30 track
+   bar, so it steers gaze without becoming a known object (a
+   follow-up re-detects); "where is the red car" -> 0 boxes ->
+   honest miss. Latency: ~2 s per 224px frame warm, ~11 s cold --
+   on-demand only, never in the 10 Hz loop. Model:
+   `google/owlvit-base-patch32` (~350 MB), same zero-shot
+   philosophy as the CLIP pick. Query phrasing matters:
+   "a window" detects, "window" does not -- ResponsePolicy wraps
+   queries as noun phrases.
+8. **Detector pick** (`hvp/detect.py`, `tests/test_recognition.py`):
+   crop 10 (hand-labeled "windows") -> "a window" top detection at
+   0.215. Honest negative: crop 0 (hand-labeled "gate", a dark
+   slatted crop) detects "a window" instead -- the crop is genuinely
+   ambiguous at 224px, and the test asserts the window case rather
+   than forcing the gate.
 
 ## Standing limits
 
