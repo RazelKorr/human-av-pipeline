@@ -146,10 +146,25 @@ def main():
         R = L.copy()
     _, _, S_l = C.stft_log(L)
     _, _, S_r = C.stft_log(R)
+    # The stereo track must cover every requested moment. A short stereo
+    # file used to poison the tail with NaN pans (empty ILD slices ->
+    # NaN map -> argmax (0,0) peaks and garbage displacement stats).
+    # Now: warn loudly once, fall back to centered pan for uncovered
+    # moments -- honest silence, never NaN.
+    need = n_mom * 20  # STFT frames, 200/s
+    have = min(len(S_l), len(S_r))
+    if have < need:
+        print(f"WARNING: stereo STFT covers {have / 200.0:.1f}s but "
+              f"{n_mom / 10.0:.1f}s were requested; moments from "
+              f"{have // 20} on get centered (mono) pan", flush=True)
     pan_bin = np.zeros((n_mom, C.N_BINS), dtype=np.float32)
     for m in range(n_mom):
         sl = slice(m * 20, (m + 1) * 20)
-        ild = (S_l[sl] - S_r[sl]).mean(axis=0)  # dB; + = left louder
+        seg_l, seg_r = S_l[sl], S_r[sl]
+        if len(seg_l) < 2 or len(seg_r) < 2:
+            continue  # stays centered
+        ild = (seg_l - seg_r).mean(axis=0)  # dB; + = left louder
+        ild = np.nan_to_num(ild, nan=0.0, posinf=0.0, neginf=0.0)
         pan_bin[m] = -np.clip(ild / 12.0, -1.0, 1.0)  # -1 = left
 
     # ---- closed loop: joint map vs vision-only map ----

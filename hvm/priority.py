@@ -94,6 +94,13 @@ class JointPriorityMap:
             self.map += self.w_vis * vis_sal
         if aud is not None:
             bin_sal, bin_pan = aud
+            # Last-ditch input sanitation: a NaN pan used to poison the
+            # whole map (NaN blob -> argmax (0,0)). NaN pan -> center,
+            # NaN salience -> silence. The caller should still warn.
+            bin_sal = np.nan_to_num(np.asarray(bin_sal, dtype=np.float32),
+                                    nan=0.0, posinf=0.0, neginf=0.0)
+            bin_pan = np.clip(np.nan_to_num(
+                np.asarray(bin_pan, dtype=np.float32), nan=0.0), -1.0, 1.0)
             # Mean over bins, not sum: a broadband crash drives the map
             # harder than a narrow click (loudness-like), and the audio
             # total stays bounded ~[0, w_aud] so one loud moment cannot
@@ -123,6 +130,7 @@ class JointPriorityMap:
         attention is hemifield-ish, not pinpoint.
         """
         xs = pan_to_x(np.asarray(pans, dtype=np.float32), self.size)
+        xs = np.nan_to_num(xs, nan=self.size / 2.0)  # NaN pan -> center
         ix = np.clip(np.round(xs - 0.5).astype(int), 0, self.size - 1)
         colmax = self.map.max(axis=0)
         return 1.0 + k * colmax[ix]
