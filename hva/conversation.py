@@ -45,35 +45,66 @@ from hva.understanding import (  # noqa: F401  (re-exported for callers)
 
 
 class Turn:
-    """A completed user turn: the transcript text and when it ended."""
-    def __init__(self, text: str, t_end: float):
+    """A completed user turn: the transcript text and its time span."""
+    def __init__(self, text: str, t_end: float, t_start: float | None = None):
         self.text = text
         self.t_end = t_end
+        # t_start is the addressed word's start; None = unknown (t_end).
+        self.t_start = t_end if t_start is None else t_start
 
     def __repr__(self):
-        return f"Turn(t_end={self.t_end:.1f}s, text={self.text!r})"
+        return (f"Turn(t_start={self.t_start:.1f}s, t_end={self.t_end:.1f}s, "
+                f"text={self.text!r})")
 
 
 class TurnDetector:
     """Fires when the system is addressed AND the utterance has ended.
 
-    update(segments, now_s) -> list[Turn]. segments are the rolling
-    transcript dicts ({start, end, text, words}). now_s is stream time.
-    A turn completes when the name was heard and no word has ended
+    update(segments, now_s, speech=None) -> list[Turn]. segments are the
+    rolling transcript dicts ({start, end, text, words}). now_s is stream
+    time. A turn completes when the name was heard and no word has ended
     within silence_s of now.
+
+    Two hallucination/duplicate guards, both evidence-based (no phrase
+    blacklists):
+
+    - Acoustic agreement: when `speech` is given -- a callable
+      (t0, t1) -> fraction of [t0, t1] with acoustic speech energy --
+      the turn's addressed span must clear min_speech_frac. Whisper
+      hallucinates prompt-colored speech ("Woodhouse, look left") over
+      long digital silence; the transcript then claims speech where
+      the acoustic record shows none, and the turn is suppressed.
+    - Re-fire suppression: the rolling transcriber re-emits the same
+      audio with slightly different word timings across overlapping
+      windows, which defeats the word-count watermark and re-fires the
+      same utterance. A turn whose addressed span overlaps the previous
+      fired turn's span (plus refire_margin_s) is suppressed.
+
+    Suppressed turns are recorded on self.suppressed as (reason, text)
+    with reason "no_speech" or "refire".
     """
 
-    def __init__(self, silence_s: float = 1.5):
+    def __init__(self, silence_s: float = 1.5,
+                 min_speech_frac: float = 0.2,
+                 refire_margin_s: float = 1.0):
         self.silence_s = silence_s
+        self.min_speech_frac = min_speech_frac
+        self.refire_margin_s = refire_margin_s
         self._addressed_at: float | None = None
         self._words_seen = 0  # word count watermark; only new words matter
+        self._last_span: tuple[float, float] | None = None
+        self.suppressed: list[tuple[str, str]] = []
 
     def _all_words(self, segments):
         for s in segments:
             for w in s.get("words", []):
                 yield w
 
-    def update(self, segments, now_s: float) -> list[Turn]:
+    def _suppress(self, reason: str, text: str):
+        self.suppressed.append((reason, text))
+        self._addressed_at = None
+
+    def update(self, segments, now_s: float, speech=None) -> list[Turn]:
         words = list(self._all_words(segments))
         new_words = words[self._words_seen:]
         self._words_seen = len(words)
@@ -98,7 +129,23 @@ class TurnDetector:
         span = [w.get("word", "").strip()
                 for w in words if w["start"] >= self._addressed_at - 0.01]
         text = " ".join(span).strip()
-        turn = Turn(text=text, t_end=last_end)
+        addressed_at, span_end = self._addressed_at, last_end
+
+        # Guard 1: same utterance re-emitted by an overlapping window.
+        if (self._last_span is not None
+                and addressed_at < self._last_span[1] + self.refire_margin_s):
+            self._suppress("refire", text)
+            return []
+
+        # Guard 2: the transcript's speech claim must agree with the
+        # acoustic record over the addressed span.
+        if speech is not None:
+            if speech(addressed_at, span_end) < self.min_speech_frac:
+                self._suppress("no_speech", text)
+                return []
+
+        turn = Turn(text=text, t_end=span_end, t_start=addressed_at)
+        self._last_span = (addressed_at, span_end)
         self._addressed_at = None
         return [turn]
 
@@ -329,15 +376,23 @@ class EnergyVAD:
         self.abs_floor = abs_floor
         self.noise_floor = abs_floor
         self.hot_ticks = 0
+        self.hot = False  # per-tick speech presence (no hangover)
 
-    def update(self, mono_100ms) -> bool:
-        """Feed one 100 ms mono chunk. Returns True on speech onset."""
+    def _level(self, mono_100ms) -> bool:
+        """True when this tick's energy clears the adaptive floor."""
         import numpy as np
         rms = float(np.sqrt(np.mean(np.asarray(mono_100ms) ** 2)) + 1e-12)
         if rms < self.noise_floor * self.ratio:
-            # Quiet: adapt the floor toward it, reset the counter.
+            # Quiet: adapt the floor toward it.
             self.noise_floor = ((1 - self.floor_alpha) * self.noise_floor
                                 + self.floor_alpha * max(rms, self.abs_floor))
+            return False
+        return True
+
+    def update(self, mono_100ms) -> bool:
+        """Feed one 100 ms mono chunk. Returns True on speech onset."""
+        self.hot = self._level(mono_100ms)
+        if not self.hot:
             self.hot_ticks = 0
             return False
         self.hot_ticks += 1

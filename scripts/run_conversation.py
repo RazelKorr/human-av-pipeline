@@ -98,6 +98,18 @@ def main():
     vad = EnergyVAD()
     tts = AsyncTTS()
 
+    # Per-tick acoustic speech presence for the turn detector's
+    # hallucination guard: (t_s, hot). Pruned to the recent past;
+    # the transcript lags the audio by up to the window length.
+    vad_hist: list[tuple[float, bool]] = []
+    VAD_HIST_S = 120.0
+
+    def speech_fraction(t0: float, t1: float) -> float:
+        ticks = [h for (t, h) in vad_hist if t + 0.1 > t0 and t < t1]
+        if not ticks:
+            return 0.0
+        return sum(ticks) / len(ticks)
+
     n_mom = 0
     n_turns = 0
     n_barges = 0
@@ -126,6 +138,9 @@ def main():
         # --- we can also drop a response that is still synthesizing
         # --- when the user starts talking.
         onset = vad.update(mono)
+        vad_hist.append((now_s, vad.hot))
+        while vad_hist and vad_hist[0][0] < now_s - VAD_HIST_S:
+            vad_hist.pop(0)
         if onset and speaker.is_playing(now_s):
             speaker.stop()
             n_barges += 1
@@ -151,8 +166,11 @@ def main():
             speaker.play(outpath, now_s)
             note(f"SPEAKING... ({outpath})")
 
-        # --- turn detection on transcribed-so-far words
-        for turn in detector.update(tx.transcript(), now_s):
+        # --- turn detection on transcribed-so-far words, guarded by
+        # --- the acoustic record (hallucinated speech over silence
+        # --- is suppressed) and by re-fire suppression.
+        for turn in detector.update(tx.transcript(), now_s,
+                                    speech=speech_fraction):
             n_turns += 1
             note(f"TURN: {turn.text!r}")
             t0 = time.time()
@@ -186,7 +204,13 @@ def main():
         tts.shutdown()
 
     note(f"stream ended: {n_mom} moments, {n_turns} turns, "
-         f"{n_barges} barge-ins, {n_dropped} dropped (stale synthesis)")
+         f"{n_barges} barge-ins, {n_dropped} dropped (stale synthesis), "
+         f"{len(detector.suppressed)} suppressed "
+         f"({sum(1 for r, _ in detector.suppressed if r == 'no_speech')} "
+         f"no_speech, "
+         f"{sum(1 for r, _ in detector.suppressed if r == 'refire')} refire)")
+    for reason, text in detector.suppressed:
+        note(f"SUPPRESSED ({reason}): {text!r}")
     with open(os.path.join(args.outdir, "conversation.log"), "w") as f:
         f.write("\n".join(log) + "\n")
 

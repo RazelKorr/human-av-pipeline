@@ -48,6 +48,90 @@ def test_turn_detector_ignores_unaddressed_speech():
     assert det.update(segs, 5.0) == []
 
 
+def _speech_frac(hot_spans):
+    """speech(t0, t1) callable: 1.0 inside hot_spans, else 0.0."""
+    def fn(t0, t1):
+        hot = sum(max(0.0, min(t1, e) - max(t0, s)) for s, e in hot_spans)
+        total = max(t1 - t0, 1e-9)
+        return hot / total
+    return fn
+
+
+def test_turn_detector_suppresses_hallucination_over_silence():
+    """Whisper's phantom 'Woodhouse, look left' over digital silence:
+    the transcript claims speech where the acoustic record shows none.
+    """
+    det = TurnDetector(silence_s=1.5)
+    segs = [_seg([("Woodhouse", 10.0, 10.4), ("look", 10.5, 10.7),
+                  ("left", 10.8, 11.0)])]
+    # No acoustic speech anywhere near the claimed span.
+    turns = det.update(segs, 13.0, speech=_speech_frac([]))
+    assert turns == []
+    assert det.suppressed == [("no_speech", "Woodhouse look left")]
+
+
+def test_turn_detector_fires_when_acoustics_agree():
+    det = TurnDetector(silence_s=1.5)
+    segs = [_seg([("Woodhouse", 10.0, 10.4), ("hi", 10.5, 10.8)])]
+    turns = det.update(segs, 13.0, speech=_speech_frac([(9.5, 11.5)]))
+    assert len(turns) == 1
+    assert turns[0].t_start == 10.0 and turns[0].t_end == 10.8
+    assert det.suppressed == []
+
+
+def test_turn_detector_guard_disabled_without_speech_fn():
+    """Backward compatibility: no speech evidence, old behavior."""
+    det = TurnDetector(silence_s=1.5)
+    segs = [_seg([("Woodhouse", 10.0, 10.4), ("hi", 10.5, 10.8)])]
+    assert len(det.update(segs, 13.0)) == 1
+
+
+def test_turn_detector_suppresses_window_refire():
+    """Overlapping windows re-emit the same utterance with shifted word
+    timings; the re-emission's addressed span overlaps the fired turn's.
+    Segments accumulate across updates, as the rolling transcriber does.
+    """
+    det = TurnDetector(silence_s=1.5)
+    speech = _speech_frac([(0.0, 100.0)])
+    segs = [_seg([("hey", 2.0, 2.2), ("Woodhouse", 2.3, 2.7),
+                  ("hi", 2.8, 3.0)])]
+    assert len(det.update(segs, 5.0, speech=speech)) == 1
+    # Same audio re-transcribed with shifted timings and extra words:
+    # new words arrive, but their span overlaps the fired turn's.
+    segs = segs + [_seg([("hey", 2.1, 2.3), ("Woodhouse", 2.4, 2.8),
+                         ("hi", 2.9, 3.1), ("hi", 3.2, 3.4)])]
+    assert det.update(segs, 8.0, speech=speech) == []
+    assert det.suppressed[-1][0] == "refire"
+
+
+def test_turn_detector_allows_genuine_repeat():
+    """A real second address, later and non-overlapping, still fires."""
+    det = TurnDetector(silence_s=1.5)
+    speech = _speech_frac([(0.0, 100.0)])
+    segs = [_seg([("Woodhouse", 2.0, 2.4), ("left", 2.5, 2.8)])]
+    assert len(det.update(segs, 5.0, speech=speech)) == 1
+    segs = segs + [_seg([("Woodhouse", 20.0, 20.4), ("right", 20.5, 20.8)])]
+    turns = det.update(segs, 23.0, speech=speech)
+    assert len(turns) == 1
+    assert "right" in turns[0].text
+
+
+def test_energy_vad_exposes_per_tick_presence():
+    """update() still reports onsets; .hot reports per-tick presence."""
+    import numpy as np
+    from hva.conversation import EnergyVAD
+    vad = EnergyVAD()
+    quiet = np.zeros(1600, dtype=np.float32)
+    loud = np.full(1600, 0.5, dtype=np.float32)
+    assert vad.update(quiet) is False
+    assert vad.hot is False
+    # Three hot ticks -> one onset; hot is True on every hot tick.
+    assert vad.update(loud) is False and vad.hot is True
+    assert vad.update(loud) is False and vad.hot is True
+    assert vad.update(loud) is True and vad.hot is True
+    assert vad.update(quiet) is False and vad.hot is False
+
+
 def test_response_policy_greeting():
     pol = ResponsePolicy()
     reply = pol.generate(Turn("Hi wodehaus!", 1.0))
