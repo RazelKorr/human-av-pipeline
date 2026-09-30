@@ -15,6 +15,7 @@ a language model the operator provides.
 Key source: the ANTHROPIC_API_KEY environment variable. Never in chat,
 never in the repo.
 """
+import http.client
 import json
 import os
 import urllib.parse
@@ -171,13 +172,18 @@ class HFGenerator:
 
 
 class PollinationsGenerator:
-    """Pollinations.ai classic text endpoint -- no account, no key.
+    """Pollinations.ai OpenAI-compatible endpoint -- no account, no key.
 
-    GET https://text.pollinations.ai/{prompt}?model=...&system=...
-    Keyless and free, rate-limited by IP. available is always True:
-    there is no credential to check, and any network/API failure
-    falls back to the rule-based understand() via ResponsePolicy,
-    same as the other backends.
+    POST https://text.pollinations.ai/openai with a JSON body, parsed as
+    an OpenAI chat completion. Keyless and free, rate-limited by IP.
+    available is always True: there is no credential to check, and any
+    network/API failure falls back to the rule-based understand() via
+    ResponsePolicy, same as the other backends.
+
+    Why POST and not the classic GET /text/{prompt}: the payload carries
+    the perceptual snapshot and dialogue history, and those do not belong
+    in a URL path or query string (proxy/server request logs). POST puts
+    them in the body.
 
     Trade-offs, stated plainly: a third party (pollinations.ai) sees
     the prompts, which include perceptual snapshots and dialogue.
@@ -200,12 +206,29 @@ class PollinationsGenerator:
         user_text = ("Perceptual snapshot and dialogue:\n"
                      + json.dumps(payload, indent=1)
                      + "\n\nRespond to the turn.")
-        query = urllib.parse.urlencode(
-            {"model": self.model, "system": SYSTEM_PROMPT})
-        url = (f"{self.BASE_URL}/{urllib.parse.quote(user_text)}?{query}")
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return resp.read().decode().strip()
+        body = json.dumps({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text},
+            ],
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.BASE_URL}/openai", data=body,
+            headers={"Content-Type": "application/json"})
+        # One retry on connection-level drops only (RemoteDisconnected etc.).
+        # HTTP errors -- including 429/503 -- propagate immediately so the
+        # service's backoff signals are respected, not fought.
+        last_exc = None
+        for _ in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    data = json.loads(resp.read().decode())
+                return data["choices"][0]["message"]["content"].strip()
+            except (http.client.RemoteDisconnected, ConnectionResetError,
+                    TimeoutError) as exc:
+                last_exc = exc
+        raise last_exc
 
 
 class ApiGenerator:

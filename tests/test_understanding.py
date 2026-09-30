@@ -351,8 +351,9 @@ def test_select_llm_backend_free():
 
 
 def test_free_generator_generate_mocked(monkeypatch):
-    """PollinationsGenerator builds the GET URL with prompt/system/model."""
-    import urllib.parse
+    """PollinationsGenerator POSTs an OpenAI-style body: model, system and
+    user messages, prompt in the body (not the URL)."""
+    import json
     import urllib.request
     from hva.llm import PollinationsGenerator, SYSTEM_PROMPT
 
@@ -362,23 +363,69 @@ def test_free_generator_generate_mocked(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): return False
         def read(self):
-            return "plain text reply".encode()
+            return json.dumps({
+                "choices": [{"message": {"content": "  hello post ok  "}}],
+            }).encode()
 
     def fake_urlopen(req, timeout=90.0):
         captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data.decode())
+        captured["content_type"] = req.get_header("Content-type")
         return FakeResp()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     gen = PollinationsGenerator(model="openai")
     reply = gen.generate({"turn": "what do you see?"})
-    assert reply == "plain text reply"
-    parts = urllib.parse.urlparse(captured["url"])
-    assert parts.netloc == "text.pollinations.ai"
-    qs = urllib.parse.parse_qs(parts.query)
-    assert qs["model"] == ["openai"]
-    assert qs["system"] == [SYSTEM_PROMPT]
-    prompt = urllib.parse.unquote(parts.path.lstrip("/"))
-    assert "what do you see?" in prompt
+    assert reply == "hello post ok"  # stripped
+    assert captured["url"] == "https://text.pollinations.ai/openai"
+    assert captured["content_type"] == "application/json"
+    body = captured["body"]
+    assert body["model"] == "openai"
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["system", "user"]
+    assert body["messages"][0]["content"] == SYSTEM_PROMPT
+    assert "what do you see?" in body["messages"][1]["content"]
+    # The payload must not leak into the URL.
+    assert "what do you see?" not in captured["url"]
+
+
+def test_free_generator_retries_connection_drop_not_429(monkeypatch):
+    """One retry on RemoteDisconnected; HTTP errors (e.g. 429) propagate
+    immediately so the service's backoff signals are respected."""
+    import http.client
+    import json
+    import urllib.request
+    from urllib.error import HTTPError
+    from unittest.mock import patch
+    from hva.llm import PollinationsGenerator
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps(
+                {"choices": [{"message": {"content": "recovered"}}]}).encode()
+
+    calls = {"n": 0}
+    def flaky(req, timeout=90.0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise http.client.RemoteDisconnected("drop")
+        return FakeResp()
+    with patch.object(urllib.request, "urlopen", flaky):
+        assert PollinationsGenerator().generate({"turn": "hi"}) == "recovered"
+    assert calls["n"] == 2
+
+    calls2 = {"n": 0}
+    def rate_limited(req, timeout=90.0):
+        calls2["n"] += 1
+        raise HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
+    try:
+        with patch.object(urllib.request, "urlopen", rate_limited):
+            PollinationsGenerator().generate({"turn": "hi"})
+    except HTTPError as e:
+        assert e.code == 429
+    assert calls2["n"] == 1
 
 
 def test_select_llm_backend_auto_prefers_api_over_free(monkeypatch):
