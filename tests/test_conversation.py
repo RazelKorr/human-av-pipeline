@@ -132,6 +132,38 @@ def test_energy_vad_exposes_per_tick_presence():
     assert vad.update(quiet) is False and vad.hot is False
 
 
+def test_conversation_runner_flushes_trailing_audio(tmp_path):
+    """Regression: the runner once silently dropped the trailing partial
+    audio chunk (13.8 s of audio -> 105 moments instead of 137), losing
+    any turns in it. Runs the real script; transcription is disabled
+    via a huge --tx-step so no Whisper model loads."""
+    import re
+    import shutil
+    import subprocess
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not available")
+    src = tmp_path / "tail.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error",
+         "-f", "lavfi", "-i", "color=c=black:s=64x64:r=10:d=13.8",
+         "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo:d=13.8",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(src)],
+        check=True, timeout=120)
+    outdir = tmp_path / "out"
+    proc = subprocess.run(
+        [sys.executable, os.path.join(REPO, "scripts", "run_conversation.py"),
+         "--src", str(src), "--seconds", "13.8", "--llm", "none",
+         "--tx-step", "100", "--outdir", str(outdir)],
+        capture_output=True, text=True, timeout=300, cwd=REPO)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    m = re.search(r"stream ended: (\d+) moments", proc.stdout)
+    assert m, proc.stdout[-2000:]
+    n_mom = int(m.group(1))
+    # 13.8 s at 10 Hz = 138 moments; without the flush() this was 105.
+    assert n_mom >= 135, f"trailing audio lost: {n_mom} moments"
+
+
 def test_response_policy_greeting():
     pol = ResponsePolicy()
     reply = pol.generate(Turn("Hi wodehaus!", 1.0))
