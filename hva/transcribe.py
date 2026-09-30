@@ -24,7 +24,7 @@ Public API:
     speech_events(segments, min_gap_s=0.4) -> speech-onset event times
 
 CLI:
-    python3 -m hva.transcribe --wav in.wav --out transcript.json
+    python3 -m hva.transcribe --wav in.mp4 --out transcript.json
 """
 
 from __future__ import annotations
@@ -86,19 +86,64 @@ def load_wav_mono(wav_path: str, target_sr: int = 16000) -> np.ndarray:
     return audio
 
 
-def transcribe(wav_path: str, model_size: str = DEFAULT_MODEL,
-               vad: bool = True) -> list[dict]:
-    """Transcribe a wav file.
+def _load_with_av(path: str, target_sr: int = 16000) -> np.ndarray:
+    """Decode any audio/video file via PyAV straight to 16k mono float32.
+
+    This deliberately bypasses faster-whisper's built-in decode path,
+    which passes a `metadata_errors` kwarg that current PyAV rejects.
+    We call av.open ourselves, with no such kwarg.
+    """
+    import av
+    container = av.open(path)
+    try:
+        stream = next(s for s in container.streams if s.type == "audio")
+    except StopIteration:
+        container.close()
+        raise ValueError(f"no audio stream in {path}")
+    resampler = av.AudioResampler(format="s16", layout="mono",
+                                  rate=target_sr)
+    chunks: list[np.ndarray] = []
+    try:
+        for frame in container.decode(stream):
+            for rf in resampler.resample(frame) or []:
+                chunks.append(
+                    np.frombuffer(rf.planes[0], dtype=np.int16))
+        for rf in resampler.resample(None) or []:
+            chunks.append(np.frombuffer(rf.planes[0], dtype=np.int16))
+    finally:
+        container.close()
+    if not chunks:
+        raise ValueError(f"decoded no audio from {path}")
+    return np.concatenate(chunks).astype(np.float32) / 32768.0
+
+
+def load_audio(path: str, target_sr: int = 16000) -> np.ndarray:
+    """Load audio from anything: wav takes the fast stdlib path,
+    every other container goes through PyAV."""
+    if path.lower().endswith(".wav"):
+        return load_wav_mono(path, target_sr)
+    return _load_with_av(path, target_sr)
+
+
+def transcribe_audio(audio: np.ndarray, model_size: str = DEFAULT_MODEL,
+                   vad: bool = True, prompt: str | None = None,
+                   beam_size: int = 5) -> list[dict]:
+    """Transcribe a 16k mono float32 array.
 
     Returns segments: {start, end, text, avg_logprob, words}.
     words: [{start, end, word, prob}]. Times in seconds.
+    prompt: optional domain vocabulary hint (initial_prompt). Helps
+    with proper nouns the mix buries; it cannot recover speech the
+    separation stage didn't isolate -- prompt after separating, not
+    instead of it.
     """
     model = _load_model(model_size)
-    audio = load_wav_mono(wav_path)
     segments, _info = model.transcribe(
         audio,
         vad_filter=vad,
         word_timestamps=True,
+        beam_size=beam_size,
+        initial_prompt=prompt,
     )
     out = []
     for s in segments:
@@ -118,6 +163,18 @@ def transcribe(wav_path: str, model_size: str = DEFAULT_MODEL,
             "words": words,
         })
     return out
+
+
+def transcribe(wav_path: str, model_size: str = DEFAULT_MODEL,
+               vad: bool = True, prompt: str | None = None,
+               beam_size: int = 5) -> list[dict]:
+    """Transcribe an audio/video file (wav, mp3, mp4, ...).
+
+    Returns segments: {start, end, text, avg_logprob, words}.
+    words: [{start, end, word, prob}]. Times in seconds.
+    """
+    return transcribe_audio(load_audio(wav_path), model_size, vad,
+                            prompt, beam_size)
 
 
 def align_to_moments(segments: list[dict], n_moments: int,
@@ -188,34 +245,29 @@ def speech_events(segments: list[dict],
     return events
 
 
-def _slice_wav(src: str, dst: str, seconds: float) -> None:
-    with wave.open(src, "rb") as w:
-        n = min(int(w.getframerate() * seconds), w.getnframes())
-        params = w.getparams()
-        frames = w.readframes(n)
-    with wave.open(dst, "wb") as w:
-        w.setparams(params)
-        w.writeframes(frames)
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description="Transcribe speech to the "
                                  "perceptual-moment grid.")
-    ap.add_argument("--wav", required=True, help="input wav (16k mono ideal)")
+    ap.add_argument("--wav", required=True,
+                    help="input audio/video (wav, mp3, mp4, ...)")
     ap.add_argument("--out", required=True, help="output json path")
     ap.add_argument("--model", default=DEFAULT_MODEL,
                     help="whisper size: tiny/base/small")
     ap.add_argument("--seconds", type=float, default=0,
                     help="only transcribe the first N seconds (0 = all)")
     ap.add_argument("--moment", type=float, default=MOMENT_S)
+    ap.add_argument("--prompt", default=None,
+                    help="domain vocabulary hint for the recognizer")
+    ap.add_argument("--beam-size", type=int, default=5)
     args = ap.parse_args()
 
-    wav = args.wav
+    audio = load_audio(args.wav)
     if args.seconds and args.seconds > 0:
-        wav = args.out + ".clip.wav"
-        _slice_wav(args.wav, wav, args.seconds)
+        audio = audio[:int(args.seconds * 16000)]
 
-    segments = transcribe(wav, model_size=args.model)
+    segments = transcribe_audio(audio, model_size=args.model,
+                                prompt=args.prompt,
+                                beam_size=args.beam_size)
     duration = max((s["end"] for s in segments), default=0.0)
     n_moments = int(duration / args.moment) + 1
     moments = align_to_moments(segments, n_moments, args.moment)
