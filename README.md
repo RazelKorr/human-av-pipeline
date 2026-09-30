@@ -57,3 +57,14 @@ Experimental. The constants are provisional, the batteries are
 synthetic, and auditory streaming (which frequencies belong to which
 source) is the big open problem on the audio side. The fusion is an
 alignment experiment, not a validated multisensory-binding model.
+
+## Provenance
+
+Entirely AI-generated -- vibecoded, as it were. Every line of code was
+written by Wodehaus, an AI agent (Muse, built by Meta), from RazelKorr
+RazelKorr's broad prompts and direction in September 2026. No code here
+was hand-written by a human; the human role was directing the work,
+testing the outputs, and making the design calls (the top-quartile gate
+on the vision->audio boost, the 100 ms shared moment grain, the call to
+publish it at all). Read it accordingly: it runs, it passes its own
+batteries, and it has not been through human code review.
