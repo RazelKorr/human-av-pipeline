@@ -125,6 +125,32 @@ def load_audio(path: str, target_sr: int = 16000) -> np.ndarray:
     return _load_with_av(path, target_sr)
 
 
+def separate_vocals(path: str, out_dir: str = "separated",
+                    model: str = "mdx_extra") -> str:
+    """Isolate the vocal stem with Demucs; return the vocals wav path.
+
+    Results are cached under out_dir/<model>/<stem>/, so reruns are
+    free. Raises a clear error when demucs/torch isn't installed.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+    try:
+        import demucs  # noqa: F401
+    except ImportError:
+        raise RuntimeError(
+            "separate_vocals needs demucs + torch in the venv "
+            "(pip install demucs torch)")
+    stem = Path(path).stem
+    vocals = Path(out_dir) / model / stem / "vocals.wav"
+    if not vocals.exists():
+        subprocess.run(
+            [sys.executable, "-m", "demucs", "--two-stems=vocals",
+             "-n", model, "-o", out_dir, path],
+            check=True)
+    return str(vocals)
+
+
 def transcribe_audio(audio: np.ndarray, model_size: str = DEFAULT_MODEL,
                    vad: bool = True, prompt: str | None = None,
                    beam_size: int = 5) -> list[dict]:
@@ -259,9 +285,17 @@ def main() -> None:
     ap.add_argument("--prompt", default=None,
                     help="domain vocabulary hint for the recognizer")
     ap.add_argument("--beam-size", type=int, default=5)
+    ap.add_argument("--separate-vocals", action="store_true",
+                    help="isolate the vocal stem with Demucs first "
+                         "(for music-heavy mixes; cached under "
+                         "separated/)")
+    ap.add_argument("--separation-model", default="mdx_extra")
     args = ap.parse_args()
 
-    audio = load_audio(args.wav)
+    src = args.wav
+    if args.separate_vocals:
+        src = separate_vocals(args.wav, model=args.separation_model)
+    audio = load_audio(src)
     if args.seconds and args.seconds > 0:
         audio = audio[:int(args.seconds * 16000)]
 
@@ -275,6 +309,7 @@ def main() -> None:
 
     payload = {
         "wav": args.wav,
+        "vocals_separated": bool(args.separate_vocals),
         "model": args.model,
         "n_segments": len(segments),
         "n_speech_events": len(events),
