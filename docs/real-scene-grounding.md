@@ -1,5 +1,11 @@
 # Real-scene grounding test (2026-09-30)
 
+> Update, later 2026-09-30: the "missing piece" named below has since
+> been built -- foveal CLIP classification feeds an ObjectMemory, and
+> "what do you see?" / "look at the X" now name and locate recognized
+> objects. See `docs/recognition.md`. The report below stands as the
+> pre-recognition baseline.
+
 First test of "Wodehaus, what do you see?" against real visual content
 instead of a black frame. 45 s of Dr. Tran ep17 (cartoon room: window
 with mountains, jack-o'-lantern upper-right, low table with a box, a

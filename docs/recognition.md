@@ -6,7 +6,8 @@ why, what it costs, and what it still cannot do.
 ## The pick: CLIP ViT-B/32, zero-shot, via transformers
 
 - **Model:** `openai/clip-vit-base-patch32`, `transformers` 5.17.0,
-  CPU, lazy load, ~350 MB weights (HuggingFace cache, gitignored).
+  CPU, lazy load, 578 MB fp32 weights (HuggingFace cache,
+  gitignored).
 - **Why this one:**
   - Already reachable through `transformers` -- no new heavy
     dependency. (`open_clip_torch` was tried first and died on a
@@ -16,7 +17,7 @@ why, what it costs, and what it still cannot do.
   - Fits the foveal-crop seam exactly: the pipeline already extracts
     a 96x96 crop around each fixation; the classifier consumes that
     crop and nothing else.
-  - Text embeddings cached per vocabulary; ~310 ms per crop on this
+  - Text embeddings cached per vocabulary; ~300 ms per crop on this
     CPU; classification throttled to moved-gaze in the live loops.
   - Honest by construction: below `unknown_threshold=0.30` it
     returns `"unknown"` instead of forcing a label, and confidence
@@ -42,12 +43,12 @@ why, what it costs, and what it still cannot do.
 
 ## Alternatives considered
 
-- **SigLIP:** better zero-shot retrieval in the literature, but
-  needs the open_clip/timm stack (broken in this environment) and
-  costs about the same at inference. Revisit if the stack heals.
+- **SigLIP:** better zero-shot retrieval in the literature; not
+  tried here -- CLIP's interface was sufficient and the crop seam
+  was the priority. Revisit if a head-to-head audit warrants it.
 - **Smaller CLIP variants (RN50, ViT-B/16):** same family, same
-  interface; ViT-B/16 is slower per crop (4x patches), RN50 no
-  better on dark crops in early probing. Not worth the swap now.
+  interface; ViT-B/16 is slower per crop (4x the patches), RN50
+  untested in this loop. Not worth the swap now.
 - **Detector-based (YOLOv8, DETR, OWL-ViT):** the honest upgrade
   path. A detector returns boxes natively, which is what "where is
   the X" actually wants -- our current grounding classifies the
@@ -56,10 +57,11 @@ why, what it costs, and what it still cannot do.
   zero-shot phrasing away; open-vocabulary detectors (OWL-ViT) keep
   it but cost more per frame. Deferred: heavier deps, and the crop
   seam was the fastest honest step.
-- **Caption/VLM (BLIP-2, LLaVA):** richer descriptions, but 10-100x
-  slower on this CPU and prone to fluent hallucination -- the
-  opposite of the honest-unknown design. Not a fit for the 10 Hz
-  loop.
+- **Caption/VLM (BLIP-2, LLaVA):** richer descriptions, but
+  autoregressive decoding per crop is much slower on this CPU than
+  one contrastive forward pass (not benchmarked here -- estimate),
+  and prone to fluent hallucination -- the opposite of the
+  honest-unknown design. Not a fit for the 10 Hz loop.
 - **DINOv2:** excellent visual features, but no zero-shot labels
   without a trained head; adds a training step we don't have data
   for.

@@ -34,9 +34,12 @@ the map.
   the same machinery the senses use. A command is a nudge, not a
   clamp — the blob decays with the map.
 - **DialogueState**: turn history (last 10), last-mentioned region.
-- **Honest limits**: "look at the red car" → "I don't know what things
-  look like yet." No object recognition; the bias channel needs a
-  target the system can locate (directions, not things).
+- **Honest limits** (updated 2026-09-30): "look at the red car" ->
+  "I don't know what a red car looks like yet" when nothing matching
+  was recognized; but "look at the X" now resolves X against the
+  ObjectMemory fed by the foveal CLIP classifier -- directions AND
+  recognized things both steer the bias channel. See
+  `docs/recognition.md`.
 
 Demo: `python scripts/demo_understand.py`
 
