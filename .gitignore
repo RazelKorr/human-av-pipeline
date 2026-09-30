@@ -1,0 +1,7 @@
+# Media and outputs stay local (input/ may be copyrighted; output/ is large)
+input/
+output/
+__pycache__/
+*.pyc
+*.npz
+.DS_Store
