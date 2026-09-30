@@ -48,9 +48,14 @@ def decode_gray(path, seconds, fps, w=None, h=None, t0=0.0):
         meta = probe(path)
         w, h = meta["w"], meta["h"]
     n = int(seconds * fps)
+    # NOTE (2026-09-30): the vf chain MUST include fps={fps}. Without it,
+    # ffmpeg emits native-fps frames while this loop reads/labels them at
+    # `fps` -- for a 30fps source that silently watches only the first
+    # third of the video stretched across the whole timeline, desynced
+    # from the audio. Every Level 3 batch run before this fix had that bug.
     cmd = ["ffmpeg", "-v", "error", "-ss", str(t0), "-i", path,
            "-t", str(seconds),
-           "-vf", f"scale={w}:{h},format=gray",
+           "-vf", f"fps={fps},scale={w}:{h},format=gray",
            "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     frame_bytes = w * h

@@ -1,90 +1,101 @@
-# Streaming input & live presence — vision notes
+# Streaming input — as-built (2026-09-30)
 
-Long-term direction: the emulator should run on live streams, not just
-uploaded files — and eventually hold its own in a Zoom call. What's
-already there, what's missing, and what "better than what they ship"
-means.
+The emulator now runs on streams, not just uploaded files. A file played
+as if live, an ffmpeg-readable URL, eventually a microphone: all of them
+are just 10 Hz ticks that haven't happened yet.
 
-## What already works (2026-09-30)
+## What was built
 
-- **Any-format decode**: `hva.transcribe.load_audio` reads wav/mp3/mp4 via
-  PyAV. The decode path is no longer the bottleneck.
-- **Vocal isolation as a stage**: `--separate-vocals` routes music-heavy
-  mixes through Demucs before transcription. Live music + speech is the
-  norm, not the exception.
-- **Moment grid**: the whole pipeline already ticks at 10 Hz perceptual
-  moments. A stream is just moments that haven't happened yet.
-- **Stateful map**: `JointPriorityMap` integrates with decay; it doesn't
-  need the whole timeline upfront. The closed loop is already online in
-  structure, just not in plumbing.
+**`hva/stream.py`** — the online sensory front-end:
 
-## What streaming actually requires
+- `StreamSource`: yields a `Tick` per 100 ms from a file or URL.
+  Video is decoded by an ffmpeg rawvideo pipe running the SAME filter
+  chain as the batch decoder (`fps=10,scale=224:224,format=gray`) --
+  bit-exact with `decode_gray` by construction. Audio is demuxed via
+  PyAV, resampled to 16 kHz stereo, and binned by sample count.
+  Moments pair video frame m with audio [m*1600,(m+1)*1600).
+  `realtime=True` paces ticks to the wall clock (times `speed`).
+- `VisionFrontEnd`: incremental retinotopic salience. The exact batch
+  math (previous frame + decaying transient channel), stateful instead
+  of a precomputed array.
+- `AudioFrontEnd`: chunked DSP. 10 s chunks with 1 s overlap run the
+  exact batch STFT/transient/ILD code; only the central 10 s of moments
+  are emitted, so chunk edges never touch the output. The Tprof ceiling
+  is a running percentile-99 over history (batch uses the whole run;
+  inject the batch ceiling for exact verification).
+- `RollingTranscriber`: windowed faster-whisper (30 s window, 10 s
+  step), stitched by start time. Speech presence per tick uses only
+  already-transcribed words -- the gate honestly trails reality by the
+  transcription lag.
 
-1. **Chunked decode, rolling buffer.** Replace "decode N seconds, then
-   process" with: PyAV reads packets continuously, frames append to a
-   ring buffer (~5 s video, ~30 s audio). The 10 Hz tick pulls the
-   newest complete moment. Backpressure: if inference lags, drop to
-   moment-skipping (never buffer unboundedly — a 30 s late "perception"
-   is a failure, not a delay).
-2. **Online transcription.** faster-whisper is batch-oriented. Options:
-   run it on rolling 30 s windows with 5 s overlap and stitch segments
-   (dedup by word timestamps), or swap in a streaming ASR (Whisper
-   streaming wrappers, or a dedicated online model). The stitching
-   approach keeps the current model and prompt machinery.
-3. **Online Demucs.** mdx_extra is non-causal (needs the full clip).
-   For live use: causal separators (Demucs streaming mode exists but
-   quality drops), or run separation on the 30 s transcription window
-   as a lookahead stage — perception lags ~30 s on speech content,
-   stays real-time on the priority map. Honest tradeoff, document it.
-4. **Stateful everything.** `run_level3.py` is a batch script: it
-   decodes the whole video, builds all arrays, then loops. The live
-   version is a tick function: `tick(frame, audio_chunk, dt)` updating
-   one persistent `JointPriorityMap`, one `AuditoryAttention`, one
-   transcript buffer. The math doesn't change; the scaffolding does.
-5. **Clock discipline.** Uploads have perfect timestamps. Streams have
-   jitter. The moment grid needs a real clock (monotonic) with
-   interpolation when a frame arrives late, not assumption of 100 ms
-   spacing.
+**`hvm/online.py`** — `OnlineLevel3.tick(...)`: the Level 3 closed loop
+as a stateful tick function. Batch (`driver.py`) and streaming both
+delegate to the same decision logic; the math didn't change, only the
+scaffolding.
 
-## Zoom-call presence ("saying hi")
+**`scripts/run_level3_stream.py`** — the stream runner:
 
-Two halves, very different difficulty:
+- `--src`: file or PyAV-readable URL.
+- `--realtime`, `--speed`: wall-clock pacing.
+- `--seconds`: stream length for files.
+- `--verify joint_maps.npz`: compares stream peaks against batch peaks.
+- `--inject-ceiling`: batch Tprof p99 ceiling for exact verification.
+- `--transcribe`: rolling Whisper on the stream.
+- Saves joint/vision-only maps and transcripts.
 
-- **Hearing the call (easy-ish).** A virtual microphone (PulseAudio
-  null sink / BlackHole on Mac) feeding the rolling buffer. This is
-  plumbing, not research.
-- **Being seen/heard (the real project).** A virtual camera output
-  means rendering *something*: at minimum a visualization of the
-  priority map / attention state (honest — "this is what I'm
-  attending to"), at most an avatar. Speaking means TTS wired to a
-  response policy, which is a whole second system (dialogue manager,
-  turn-taking from the speech-event detector — which already exists:
-  `speech_events`). Don't fake it: a "hi" that's just a triggered
-  sample is a parlor trick. The real thing is the attention system
-  deciding *when* to speak from what it heard.
+## Verification (2026-09-30)
 
-## What "better than what they ship" means
+62-second Star Tours clip, 620 moments:
 
-Stock video-call AI: transcribes everything, understands nothing about
-*attention* — no notion of what was salient, what captured the ear,
-when the voice overrode the eyes. This pipeline's edge is the joint
-priority map: it doesn't just hear the call, it has a gaze. It can say
-"you looked away when the bass dropped" or "everyone's voice pulled my
-attention at 0:42" — perceptual claims, not transcript summaries.
-That's the moat. Everything else (transcription, TTS, virtual cam) is
-commodity plumbing around it.
+- Stream vs batch joint peaks: **max difference 0.0000 map-px**.
+- Stream vs batch vision-only peaks: **max difference 0.0000 map-px**.
+- Identical statistics: 113 moments (18.2%) audio-moved, mean 13.6 px,
+  max 188.2 px.
 
-## Suggested build order
+The stream is bit-exact with the batch. Three bugs were found and fixed
+during verification:
 
-1. Tick-function refactor of the Level 3 loop (no behavior change on
-   uploads; proves the online structure).
-2. Rolling-buffer file streamer: feed an mp4 as if live, verify the
-   tick output matches the batch output.
-3. Windowed online transcription with stitching.
-4. Real stream source (RTMP/test stream), clock discipline.
-5. Virtual mic input; map visualization as virtual camera.
-6. Turn-taking + TTS: the actual "hi".
+1. **`decode_gray` fps bug.** The vf chain lacked `fps={fps}`, so ffmpeg
+   emitted native-fps frames while the loop read/labeled them at 10 fps
+   -- for a 30 fps source, a 62 s run watched the first ~21 s of video
+   stretched across the whole timeline, desynced from audio. Every
+   Level 3 batch run before this fix had the bug. (The fix had to be
+   applied to BOTH copies of `run_video.py`: the batch imports from
+   `human-av-pipeline/scripts/`, not `human-vision-pipeline/scripts/`.)
+2. **PyAV audio plane padding.** `bytes(frame.planes[0])` includes padded
+   samples beyond `frame.samples`. Reading the whole plane produced
+   garbage/misaligned audio. Fixed by slicing to `samples * channels`.
+3. **PyAV reformat vs ffmpeg scaler.** `frame.reformat(format="gray")`
+   differed by ~2 LSB from ffmpeg's `scale+format=gray`. The salience
+   normalization amplified this on dark frames. Replaced with an ffmpeg
+   rawvideo pipe using the exact batch filter chain.
 
-None of this claims validated human perception — same honesty bar as
+## What streaming does NOT do yet
+
+- **Demucs** is non-causal (needs the whole file). The live path
+  transcribes the raw mix. Perception lags speech by ~10-30 s; the
+  priority map stays real-time. Documented cost of causality, not a bug.
+- **Realtime wall-clock test**: `--realtime` exists but sustained
+  throughput vs lag hasn't been measured yet.
+- **Rolling Whisper latency**: the transcriber runs, but end-to-end
+  transcription lag hasn't been profiled.
+- **"Saying hi"** still needs: turn detection, a response policy, TTS,
+  and output-device plumbing. Hearing a call is plumbing (virtual mic
+  into the rolling buffer). Being heard is a second system.
+
+## Design notes for live use
+
+- Backpressure: if inference lags, the tick loop should drop to
+  moment-skipping, never buffer unboundedly. A 30 s late "perception"
+  is a failure, not a delay. (Not yet implemented -- the current code
+  processes every tick.)
+- Clock discipline: uploads have perfect timestamps; live streams have
+  jitter. The moment grid will need a real monotonic clock with
+  interpolation when frames arrive late. (Current code assumes 100 ms
+  spacing from the source.)
+- A stalled video stalls emission until EOF. Correct for files; live
+  video stalls are a documented v1 limitation.
+
+None of this claims validated human perception -- same honesty bar as
 the rest of the repo. It's an emulator with known, documented
 deviations, and the deviations are the interesting part.
