@@ -87,9 +87,12 @@ def main():
           if args.transcribe else None)
 
     dva = B.FIELD_WIDTH_DEG / 224.0
-    joint = OnlineLevel3(dva)
-    visonly = OnlineLevel3(dva)
-    gated = OnlineLevel3(dva)
+    # Match the batch convention: saccades landing past t_end are dropped.
+    # Without this the stream keeps one extra saccade (206 vs 207).
+    t_end = args.seconds * 1000.0 if args.seconds else float("inf")
+    joint = OnlineLevel3(dva, t_end_ms=t_end)
+    visonly = OnlineLevel3(dva, t_end_ms=t_end)
+    gated = OnlineLevel3(dva, t_end_ms=t_end)
 
     vis_queue: list = []       # vision outputs waiting for their audio twin
     Tprof_list, pan_list = [], []
