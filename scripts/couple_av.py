@@ -55,7 +55,7 @@ def main():
     print(f"Pass 1: {len(onsets)} audio onsets with pan")
 
     # ---- Pass 2: visual driver with audio bias ----
-    video = os.path.join(VIS_ROOT, "input", "star_tours_1_ride_film.mp4")
+    video = os.path.join(ROOT, "input", "star_tours_1_ride_film.mp4")
     scanpath, controller, vis_trans = build_visual_scanpath(
         video, 62.5, audio_onsets=onsets)
     np.savez(os.path.join(OUTDIR, "visual_scanpath_coupled.npz"),

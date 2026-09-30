@@ -151,7 +151,7 @@ def main():
         scanpath = [tuple(s) for s in z["scanpath"]]
         print(f"loaded cached scanpath ({len(scanpath)} saccades)")
     else:
-        video = os.path.join(VIS_ROOT, "input",
+        video = os.path.join(ROOT, "input",
                              "star_tours_1_ride_film.mp4")
         scanpath, _, _ = build_visual_scanpath(video, args.seconds + 0.5)
         np.savez(SCANPATH_NPZ,
@@ -170,7 +170,7 @@ def main():
 
     # ---- audio trace ----
     audio_trace = []
-    with open(os.path.join(AUD_ROOT, "output", "star_tours_62s", "dwell",
+    with open(os.path.join(ROOT, "output", "star_tours_62s", "dwell",
                            "trace.txt")) as fh:
         for line in fh.readlines()[1:]:
             p = line.split()
