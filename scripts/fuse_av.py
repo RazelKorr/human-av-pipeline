@@ -25,15 +25,13 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-AUD_ROOT = os.path.dirname(HERE)
-VIS_ROOT = os.path.join(os.path.dirname(AUD_ROOT), "human-vision-pipeline")
-sys.path.insert(0, AUD_ROOT)
-sys.path.insert(0, os.path.join(VIS_ROOT, "scripts"))
-sys.path.insert(0, VIS_ROOT)
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)
 
 from hva import cochlea as C
 
-OUTDIR = os.path.join(AUD_ROOT, "output", "fused")
+OUTDIR = os.path.join(ROOT, "output", "fused")
 SCANPATH_NPZ = os.path.join(OUTDIR, "visual_scanpath_62s.npz")
 
 # Visual content lags its timestamp by two moments (200ms of pipeline

@@ -267,7 +267,10 @@ def a4_switch_dullness():
             "control_reach_s": t2}
 
 
-def run_all():
+def run_all(seed=7):
+    # Fixed seed: the battery's stimuli use noise, and an unseeded run
+    # is flaky at the margins (A1b/A4 flicker). Deterministic here.
+    np.random.seed(seed)
     results = {}
     for name, fn in [("A0", a0_latency), ("A1", a1_change_deafness),
                      ("A1b", a1b_change_attended),

@@ -1,69 +1,59 @@
-# Human Audio Pipeline
+# Human AV Pipeline
 
-An experimental model of human auditory attention: waveform in, a 10 Hz
-stream of *attended* perceptual moments out. Built as a companion to a
-human-vision pipeline, with cross-modal (audio-visual) coupling.
+Two experimental models of human perception -- one for hearing, one for
+vision -- plus the machinery that fuses them into a single synchronized
+feed. Waveform in, video in; a 10 Hz stream of *attended* perceptual
+moments out.
 
-This is a research demo, not a validated model of hearing or
+This is a research demo, not a validated model of perception or
 consciousness. Every constant is provisional and every mechanism is
 meant to be argued with.
 
-## Architecture
+## The two systems
 
-```
-waveform -> cochlea -> salience -> moments -> attention -> trace
-                |                                  |
-           spatial.py                         vis_boost (Level 2)
-           (stereo pan)                        (from vision)
-```
+**`hva/` -- the ears.** Cochlea (16 kHz STFT, 64 log bins 50 Hz-8 kHz,
+absolute dBFS) -> salience (intensity + frequency-contrast + onset
+channels, -60 dBFS hearing floor) -> 100 ms perceptual moments ->
+attention controller. Two paths: an express interrupt (sharp transient
+yanks focus in ~50 ms, with a 100 ms attentional blink and habituation
+to repetition) and a scheduled path (reconsiders at most every 200 ms,
+150 ms switch latency, distance cost, inhibition of return). Quiet
+dwells. `hva/spatial.py` adds binaural pan (ILD + ITD) from stereo.
+Synthetic validation battery: 6/6 passing. See SPEC_AUDIO.md.
 
-- **hva/cochlea.py** -- 16 kHz STFT (20 ms Hann, 5 ms hop), 64
-  log-spaced bins 50 Hz-8 kHz, absolute dBFS. The cochlea does a lot of
-  the work for free; the hard part is deciding what belongs to what.
-- **hva/salience.py** -- intensity + frequency-contrast + temporal-
-  contrast (onset) channels, fused into a salience map. A -60 dBFS
-  hearing floor keeps near-silence from hallucinating onsets.
-- **hva/moments.py** -- 100 ms perceptual moments (20 frames each):
-  mean spectrum, mean salience, loudness, max short-term change.
-  The 100 ms grain is shared with the vision pipeline.
-- **hva/attention.py** -- the controller. Two paths:
-  - *Express interrupt*: a sharp transient (above the 95th percentile
-    of recent change, floored at 6 dB) yanks focus in ~50 ms, with a
-    100 ms attentional blink afterward and habituation to repetition.
-  - *Scheduled*: at most every 200 ms, focus reconsiders; switching
-    costs 150 ms latency, with distance cost and inhibition of return.
-  - In quiet it dwells rather than chasing noise.
-- **hva/spatial.py** -- binaural cues from stereo: per-moment ILD pan
-  plus ITD refinement around onsets. *Where* the sound is.
-- **hva/battery.py** -- synthetic validation: abrupt-event latency,
-  unattended vs attended change, cocktail-party streaming, onset
-  capture, post-switch refractory. 6/6 passing.
+**`hvp/` -- the eyes.** Temporal integrator -> saccade controller ->
+foveated retina -> 10 Hz perceptual moments. Brightness and change
+capture initial gaze; attention remembers points of interest and
+searches around them; foveal inspection feeds recognition, which
+redirects the next saccades. Validation battery: latency, flicker
+fusion, wagon-wheel reversal, saccadic suppression, change blindness --
+5/5. See SPEC_VISION.md.
 
-## Levels of audio-visual fusion
+## Fusion (scripts/)
 
-- **Level 1** (`scripts/fuse_av.py`): synchronized 10 Hz joint feed --
-  gaze + audio focus + both event streams on one media timeline.
-  Visual content lags audio by ~2 moments (ears are faster than eyes);
-  the feed pairs by media time and documents the lag.
-- **Level 2** (`scripts/couple_av.py`): bidirectional coupling. Audio
-  onsets tug saccades toward the panned side (+alerting gain); visual
-  transients lower the auditory capture bar (top quartile only).
+- **Level 1** (`fuse_av.py`): one joint 10 Hz feed -- gaze + audio focus
+  + both event streams on a shared media timeline. Visual content lags
+  audio by ~2 moments (ears are faster than eyes); the feed pairs by
+  media time and documents the lag.
+- **Level 2** (`couple_av.py`): bidirectional coupling. Audio onsets tug
+  saccades toward the panned side (+alerting gain); visual transients
+  lower the auditory capture bar (top quartile only -- the film's
+  background wiggling doesn't get a vote).
 - **Level 3**: joint priority map (planned).
 
 ## Running it
 
 ```bash
 pip install -r requirements.txt
-# Put a 16 kHz mono wav at input/ and adapt scripts/run_star_tours.py,
-# or run the synthetic battery:
-python3 -m hva.battery
+python3 scripts/demo_vision.py      # vision validation battery
+python3 -m hva.battery              # audio validation battery (from repo root)
+# Fusion needs a video + its audio side by side; see scripts/fuse_av.py
+# --help. input/ and output/ are gitignored: bring your own media.
 ```
-
-`input/` and `output/` are gitignored -- bring your own media
-(the original runs used a Star Tours ride-film soundtrack).
 
 ## Status
 
-Experimental. Constants are provisional, the battery is synthetic, and
-auditory streaming (which frequencies belong to which source) is the
-big open problem. See SPEC.md for the full design notes and caveats.
+Experimental. The constants are provisional, the batteries are
+synthetic, and auditory streaming (which frequencies belong to which
+source) is the big open problem on the audio side. The fusion is an
+alignment experiment, not a validated multisensory-binding model.

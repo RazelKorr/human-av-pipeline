@@ -22,12 +22,9 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-AUD_ROOT = os.path.dirname(HERE)
-VIS_ROOT = os.path.join(os.path.dirname(AUD_ROOT), "human-vision-pipeline")
-sys.path.insert(0, AUD_ROOT)
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(VIS_ROOT, "scripts"))
-sys.path.insert(0, VIS_ROOT)
 
 from hva import cochlea as C
 from hva import salience as S
@@ -36,8 +33,8 @@ from hva import attention as AT
 from hva import spatial as SP
 from fuse_av import build_visual_scanpath
 
-OUTDIR = os.path.join(AUD_ROOT, "output", "fused")
-DWELL = os.path.join(AUD_ROOT, "output", "star_tours_62s", "dwell")
+OUTDIR = os.path.join(ROOT, "output", "fused")
+DWELL = os.path.join(ROOT, "output", "star_tours_62s", "dwell")
 
 
 def main():
@@ -45,7 +42,7 @@ def main():
 
     # ---- Pass 1: audio onsets + pan ----
     sr, l, r = SP.load_stereo(
-        os.path.join(AUD_ROOT, "input", "star_tours_0-62s_44k_stereo.wav"))
+        os.path.join(ROOT, "input", "star_tours_0-62s_44k_stereo.wav"))
     pan, conf = SP.moment_pan(l, r, sr)
     onsets = []  # (t_s, pan, conf)
     with open(os.path.join(DWELL, "trace.txt")) as fh:
