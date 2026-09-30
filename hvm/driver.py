@@ -5,6 +5,11 @@ Contract for stim_fn(m):
   m -> (vis_sal, aud), where vis_sal is a (56,56) array in ~[0,1] or None,
   and aud is (bin_sal_64, bin_pan_64) or None.
 
+speech_fn(m), optional, returns a scalar in [0,1]: smoothed speech
+presence for moment m. Kept separate from stim_fn so existing 2-tuple
+stimuli keep working; the driver passes it to JointPriorityMap.step as
+the speech gate.
+
 Read-time (oculomotor, not sensory -- never written to the map):
   - inhibition of return, 1500 ms
   - the human amplitude prior (~5-15 deg saccades)
@@ -22,7 +27,7 @@ from hvm.priority import JointPriorityMap, SIZE
 SCALE = 224.0 / SIZE  # map px -> 224-space px
 
 
-def run_closed_loop(stim_fn, seconds, dva_per_px):
+def run_closed_loop(stim_fn, seconds, dva_per_px, speech_fn=None):
     """Returns dict(scanpath, maps, peaks). scanpath entries are
     (t_on_ms, x_224, y_224); maps[m] is the joint map after moment m;
     peaks[m] is (x, y, value) in map px."""
@@ -39,7 +44,8 @@ def run_closed_loop(stim_fn, seconds, dva_per_px):
     for m in range(n_mom):
         t = m * 100.0
         vis_sal, aud = stim_fn(m)
-        jmap.step(100.0, vis_sal=vis_sal, aud=aud)
+        sp = float(speech_fn(m)) if speech_fn is not None else 0.0
+        jmap.step(100.0, vis_sal=vis_sal, aud=aud, speech=sp)
         maps.append(jmap.map.copy())
         peaks.append(jmap.peak())
 

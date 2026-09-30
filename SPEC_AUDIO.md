@@ -158,6 +158,21 @@ aligned to the 100 ms moment grid (`align_to_moments`). Speech onsets
 attention events (`speech_events`), so the attention system can treat
 linguistic onsets the way it treats acoustic captures.
 
+**Speech-gated attention (same night).** `speech_presence` turns the
+transcript into a per-moment scalar in [0,1] -- binary word-span
+presence plus a 300 ms exponential hangover so the auditory gain
+releases on the map's own clock instead of chattering between words.
+`scripts/run_level3.py --transcript` passes it to
+`JointPriorityMap.step(..., speech=...)`, which scales the auditory
+write by `(1 + SPEECH_BOOST * speech)`. Attenuation across inputs
+falls out of the shared map's normalization rather than a separate
+suppression knob: the Dr Tran data shows vision keeps working during
+dense narration (title-card dwells), so globally muting vision during
+speech would be wrong. Stream-level, not bin-level -- every frequency
+bin is scaled equally, so a loud non-speech transient during speech
+gets boosted too; stream separation (which bins carry the voice) is
+the recorded v1 gap.
+
 Why: the whole point of speech. Frequency-band attention hears
 *transients*; dialogue-driven media is steered by *words*. The Dr Tran
 runs showed the narrator's voice relocating visual attention (joint

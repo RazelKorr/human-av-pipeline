@@ -69,11 +69,29 @@ priority map. Both systems write to it; both read from it.
 
 **Provisional constants** (all guesses, all need a scientific audit):
 `W_VIS=1.0`, `W_AUD=0.7`, `TAU_MS=300.0`, `AUD_SPREAD_PX=6.0`,
-`READ_GAIN_K=1.5`. Audio write strength is mean-normalized across
+`READ_GAIN_K=1.5`, `SPEECH_BOOST=1.0`. Audio write strength is mean-normalized across
 frequency bins so a broadband transient can't drown vision by bin
 count alone.
 
-**Validation** (`hvm/battery.py`, synthetic, deterministic, 5/5):
+**Speech gating** (`--transcript` on the runner, `hva/transcribe.py`
+`speech_presence`, `JointPriorityMap.step(..., speech=...)`): when
+speech is present, the auditory write is scaled by
+`(1 + SPEECH_BOOST * speech)`, so audition's vote doubles during
+speech (0.7 -> 1.4) -- enough to outvote vision in an equal-strength
+conflict. The voice captures the map; that is the cocktail-party
+direction. Attenuation across inputs falls out of the shared map's
+normalization: when the ears get louder, everything else gets
+relatively quieter. There is deliberately no global visual-suppression
+knob -- real-media data (Dr Tran: title-card dwells during dense
+narration) shows vision keeps working while speech runs, so muting
+vision during speech would be wrong. Speech presence is binary from
+word spans plus a 300 ms exponential hangover (same clock as the
+map's persistence; a guess). Stream-level, not bin-level: every bin
+is scaled equally, so a loud non-speech transient during speech gets
+boosted too. The real fix is stream separation -- identifying which
+bins carry the voice -- recorded as the v1 gap.
+
+**Validation** (`hvm/battery.py`, synthetic, deterministic, 6/6):
 
 - M1 congruence: matched flash-left/click-left makes one combined
   peak; mismatched makes two competing peaks (ratio 1.59). Orienting
@@ -83,6 +101,10 @@ count alone.
 - M4 conflict: equal-strength flash-left/click-right -- vision wins
   under current weighting (peak x=14.0).
 - M5 audio read path: left-panned bin gain 1.38, right-panned 1.00.
+- M6 speech gating: equal-strength flash-right/click-left -- without
+  speech the peak sits at x=42.0 (vision wins, the ventriloquism
+  direction); with speech present it flips to x=10.0 (speech-gated
+  audio wins).
 
 **Real media** (`scripts/run_level3.py`, Star Tours 62 s):
 

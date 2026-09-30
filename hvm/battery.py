@@ -12,6 +12,10 @@ All synthetic, all deterministic (no RNG anywhere).
       win the peak (the ventriloquism direction, per W_AUD < W_VIS).
   M5  audio read path: a left-peaked map gives left-panned bins a larger
       spatial gain than right-panned bins.
+  M6  speech gating: flash-right + click-left at equal strength. Without
+      speech, vision wins the peak (the ventriloquism direction, as in
+      M4). With speech present, the speech-gated auditory boost should
+      flip the peak to the click -- the voice captures the map.
 
 Usage: python3 -m hvm.battery   (from the repo root)
 """
@@ -118,12 +122,27 @@ def m5_audio_read():
                f"right-panned bin {g[1]:.2f} (need <1.15)"
 
 
+def m6_speech_gating():
+    vis = _flash(RIGHT_X, MID_Y, amp=1.0)
+    aud = _click(0, 64, amp=1.0, pan=-0.8)
+    stim = _stim(vis=vis, aud=aud)
+    r0 = run_closed_loop(stim, 1.0, DVA)
+    r1 = run_closed_loop(stim, 1.0, DVA, speech_fn=lambda m: 1.0)
+    x0 = r0["peaks"][6][0]
+    x1 = r1["peaks"][6][0]
+    ok = x0 > SIZE / 2 and x1 < SIZE / 2
+    return ok, (f"no-speech peak x={x0:.1f} (need >28: vision wins); "
+                f"speech peak x={x1:.1f} (need <28: speech-gated "
+                f"audio flips it)")
+
+
 TESTS = [
     ("M1 congruence (matched > mismatched)", m1_congruence),
     ("M2 audio alone -> left peak", m2_audio_alone),
     ("M3 vision alone -> right peak", m3_vision_alone),
     ("M4 conflict -> vision wins", m4_conflict),
     ("M5 audio read path (spatial gains)", m5_audio_read),
+    ("M6 speech gating flips a conflict", m6_speech_gating),
 ]
 
 

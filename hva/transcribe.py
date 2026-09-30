@@ -143,6 +143,29 @@ def align_to_moments(segments: list[dict], n_moments: int,
     return moms
 
 
+def speech_presence(segments: list[dict], n_moments: int,
+                    moment_s: float = MOMENT_S,
+                    hangover_ms: float = 300.0) -> np.ndarray:
+    """Per-moment speech presence in [0,1] for the attention system.
+
+    Binary from word spans (via align_to_moments), then a hangover:
+    presence decays exponentially after speech ends instead of
+    chattering the auditory gain off between words. hangover_ms=300
+    matches the map's TAU_MS -- the gain release and the map's memory
+    run on the same clock, which is a guess, documented as one.
+    """
+    moms = align_to_moments(segments, n_moments, moment_s)
+    binary = np.array([1.0 if m["speech"] else 0.0 for m in moms],
+                      dtype=np.float32)
+    decay = float(np.exp(-(moment_s * 1000.0) / hangover_ms))
+    out = np.zeros_like(binary)
+    carry = 0.0
+    for i, b in enumerate(binary):
+        carry = b if b > carry * decay else carry * decay
+        out[i] = carry
+    return out
+
+
 def speech_events(segments: list[dict],
                   min_gap_s: float = 0.4) -> list[dict]:
     """Speech-onset events: a segment starting after >= min_gap_s of

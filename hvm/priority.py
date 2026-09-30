@@ -25,11 +25,26 @@ nudging system B's input, both systems meet at the map.
 Provisional constants -- audit before citing:
   W_VIS=1.0, W_AUD=0.7 : vision dominates spatial orienting
       (the ventriloquism direction). The audio weight is a guess.
+  SPEECH_BOOST=1.0 : when speech is present, audition's map vote
+      doubles (0.7 -> 1.4), enough to outvote vision in an
+      equal-strength conflict. The voice captures the map -- the
+      cocktail-party direction. A round-number guess; the battery's
+      M6 pins the behavioral requirement (speech flips a conflict
+      audition otherwise loses), not the value.
   TAU_MS=300 : map persistence. Between the transient channel (200 ms)
       and inhibition of return (1500 ms). A guess.
   AUD_SPREAD_PX=6.0 : the auditory splat is broad on purpose -- hearing
       localizes worse than vision, and the map should know that.
   READ_GAIN_K=1.5 : how strongly a map peak boosts bins at its azimuth.
+
+Speech gating is stream-level, not bin-level: `speech` is a scalar per
+moment in [0,1] (smoothed presence from the transcript channel). Every
+bin's write is scaled equally, so a loud non-speech transient during
+speech gets boosted too -- honest v1 limitation. The real fix is stream
+separation (identifying *which* bins carry the voice); until then the
+boost is "something is being said, so weight the ears more," not
+"the voice is at this azimuth." No validated human multisensory binding
+is claimed; this is gain control, not binding.
 """
 
 import numpy as np
@@ -39,6 +54,7 @@ from hvp.attention import _blob
 SIZE = 56            # map resolution; matches visual salience
 W_VIS = 1.0
 W_AUD = 0.7
+SPEECH_BOOST = 1.0
 TAU_MS = 300.0
 AUD_SPREAD_PX = 6.0
 READ_GAIN_K = 1.5
@@ -58,11 +74,19 @@ class JointPriorityMap:
         self.tau_ms = tau_ms
         self.map = np.zeros((size, size), dtype=np.float32)
 
-    def step(self, dt_ms, vis_sal=None, aud=None):
+    def step(self, dt_ms, vis_sal=None, aud=None, speech=0.0):
         """Integrate one tick.
 
         vis_sal: (56,56) array in ~[0,1], or None.
         aud: (bin_sal_64, bin_pan_64), both in ~[0,1] / [-1,1], or None.
+        speech: scalar in [0,1] -- smoothed speech presence this moment.
+            Scales the auditory write by (1 + SPEECH_BOOST*speech).
+            The shared map's normalization does the attenuating: when
+            the ears get louder, everything else gets relatively
+            quieter. No separate visual-suppression knob -- the Dr Tran
+            data shows vision keeps working during dense narration
+            (title-card dwells), so global visual attenuation during
+            speech would be wrong.
         Returns the map.
         """
         self.map *= np.exp(-dt_ms / self.tau_ms)
@@ -76,13 +100,14 @@ class JointPriorityMap:
             # permanently evict vision from its own map. The per-bin
             # spatial structure is preserved -- bins still splat at
             # their own pans -- only the total is normalized.
+            w_aud_eff = self.w_aud * (1.0 + SPEECH_BOOST * speech)
             acc = 0.0
             for s, p in zip(bin_sal, bin_pan):
                 if s > 1e-6:
                     x0 = pan_to_x(p, self.size)
                     acc = acc + s * _blob((self.size, self.size),
                                          x0, self.size / 2.0, AUD_SPREAD_PX)
-            self.map += self.w_aud * acc / max(len(bin_sal), 1)
+            self.map += w_aud_eff * acc / max(len(bin_sal), 1)
         return self.map
 
     def peak(self):

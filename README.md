@@ -67,6 +67,14 @@ the pipeline venv (`../.venv-pipeline`, relative to the repo root) --
 system Pythons managed by the OS fight the install. Model weights live in
 `models/faster-whisper-base` (gitignored, downloaded once).
 
+**Speech-gated attention.** The transcript feeds back into the joint
+map: `scripts/run_level3.py --transcript` scales the auditory map
+write by smoothed speech presence, doubling audition's vote while
+someone is talking (`SPEECH_BOOST=1.0`, `hvm/priority.py`). The shared
+map's normalization does the attenuating -- when the ears get louder,
+everything else gets relatively quieter. Battery M6: speech flips an
+equal-strength flash/click conflict that vision otherwise wins.
+
 ## Running it
 
 ```bash
