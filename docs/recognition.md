@@ -85,10 +85,17 @@ frame -> foveal crop (96x96 @ fixation, 2x upscale)
              ObjectDetector (OWL-ViT, on-demand, ~2 s CPU) scans the
              current frame; best box -> bias + "Found the X";
              >= 0.30 conf also becomes a track
-      -> (e) "what do you see?": PerceptualState.describe() names objects
-      -> (f) ResponsePolicy: memory + t_now + gaze on every turn;
+      -> (e) anaphora: "look at it again" re-resolves dialogue's last
+             region verbatim (a spatial pick stays picked); "the left
+             one" picks among the last label's tracks (or all live
+             tracks); "that gate" strips the determiner; bare "it"
+             with no referent is an honest miss
+      -> (f) "what do you see?": PerceptualState.describe() names objects
+      -> (g) ResponsePolicy: memory + t_now + gaze on every turn;
              policy.detector + policy.frame_fn wire the detection
              fallback; LLM payload inherits objects via describe()
+             AND the recognition layer (build_payload's
+             recognized_objects: label, region, track confidence)
 ```
 
 ## Audits
@@ -155,6 +162,21 @@ frame -> foveal crop (96x96 @ fixation, 2x upscale)
    slatted crop) detects "a window" instead -- the crop is genuinely
    ambiguous at 224px, and the test asserts the window case rather
    than forcing the gate.
+
+9. **Anaphora** (`scripts/audit_anaphora.py`, live-run replay):
+   "look at the windows" ; "look at it again" repeats the bias peak;
+   "the left one"/"the right one" split the two window tracks; "it"
+   after "the right one" stays on the right track; bare "it" with no
+   prior region -> honest miss, no bias; "look at that gate" hits the
+   gate track. Anaphoric forms never consult the detector -- they are
+   relative among known tracks.
+10. **LLM payload grounding** (`tests/test_llm.py`, 5 tests):
+    `build_payload()` now includes `recognized_objects` (label,
+    qualitative region, track confidence) from the live memory, and
+    the system prompt's stale "no object recognition" rule is
+    replaced with list-membership honesty. The model is still the
+    ceiling and the rules the floor; the payload is what makes the
+    model's words about something real.
 
 ## Standing limits
 
