@@ -24,7 +24,7 @@ Honest limits, stated plainly:
   - Object recognition exists but is narrow: zero-shot CLIP over a
     small vocabulary (hvp/recognize.py), 6/12 top-1 on the hand-labeled
     dark-scene set. "Look at the red car" when no car has been seen
-    gets "I don't know what a red car looks like yet" plus the list of
+    gets "I don't see one right now" plus the list of
     things actually recognized so far. Out-of-vocabulary objects are
     invisible by name.
   - No deep semantics. The intents are patterns, not understanding.
@@ -67,6 +67,7 @@ NAME_PATTERNS = [
     # where's the gate?"); the gate turn never fired because no pattern
     # matched. Observed, not guessed.
     r"woat\s+house",
+    r"wote\s+house",  # observed 2026-10-01 live --owl run
 ]
 
 
@@ -707,7 +708,7 @@ def understand(turn_text: str,
                 known = (memory.known_objects()
                          if memory is not None else [])
                 if referent:
-                    reply = (f"I don't know what a {referent} looks like yet")
+                    reply = ("I don't see one right now")
                 else:
                     reply = "I couldn't tell what you want me to look at"
                 if known:

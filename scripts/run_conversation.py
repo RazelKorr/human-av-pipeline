@@ -45,26 +45,69 @@ from hvp.detect import pil_from_frame
 
 
 class LatestFrame:
-    """The runner's most recent 224x224 frame, served as PIL RGB.
+    """The runner's most recent frame, served as PIL RGB.
 
-    process_measure() calls update() once per tick; policy.frame_fn is
-    this object's as_pil. The 10 Hz loop only stores the frame -- the
+    process_measure() calls update() once per tick with the 224x224
+    reflex frame and the current stream time; policy.frame_fn is this
+    object's as_pil. The 10 Hz loop only stores the frame -- the
     detector itself runs solely inside the turn handler (generate ->
     understand's last-resort path), i.e. on demand, never per tick.
+
+    as_pil prefers a full-res color frame decoded on demand from the
+    source file at the latest stream timestamp (2026-10-01: the live
+    --owl fire showed the detector starved on the 224px grayscale
+    reflex frame -- borderline 0.10-0.18 scores where full-res color
+    sees clearly). Falls back to the reflex frame for live/non-file
+    sources, where no seekable file exists.
     """
 
-    def __init__(self):
+    def __init__(self, src=None):
         self.frame = None  # 224x224 float32 in 0..1, or None
+        self.t_s = 0.0     # stream time of the latest frame, seconds
+        self.src = src     # source path; full-res grab needs a file
 
-    def update(self, frame):
+    def update(self, frame, t_s=None):
         if frame is not None:
             self.frame = frame
+            if t_s is not None:
+                self.t_s = t_s
 
     def as_pil(self):
         """PIL RGB of the latest frame, or None if no frame seen yet."""
+        if self.src and os.path.isfile(self.src):
+            img = grab_frame(self.src, self.t_s)
+            if img is not None:
+                return img
         if self.frame is None:
             return None
         return pil_from_frame(self.frame)
+
+
+def grab_frame(src, t_s, max_w=960):
+    """One full-res color frame from a local file at stream time t_s.
+
+    Fast keyframe seek (not sample-accurate, but instant); capped at
+    max_w wide so the PNG stays small. Returns a PIL RGB image, or
+    None when ffmpeg can't produce one.
+    """
+    import io
+    import subprocess
+    from PIL import Image
+    cmd = ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, t_s):.1f}",
+           "-i", src, "-frames:v", "1",
+           "-vf", f"scale={max_w}:-1",
+           "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
+    try:
+        p = subprocess.run(cmd, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=20)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if not p.stdout:
+        return None
+    try:
+        return Image.open(io.BytesIO(p.stdout)).convert("RGB")
+    except Exception:
+        return None
 
 
 def wire_owl_detection(policy, latest_frame, enabled,
@@ -72,11 +115,13 @@ def wire_owl_detection(policy, latest_frame, enabled,
     """Opt-in OWL-ViT for the live conversation loop.
 
     Sets policy.detector / policy.frame_fn so "where is the X" / "find
-    the X" with no memory track scans the runner's latest frame. The
-    model loads lazily on the first query (~350 MB, ~2 s/query CPU);
-    detection stays out of the 10 Hz reflex loop -- update() above is
-    the only per-tick cost, a reference store. detector_factory is a
-    seam for tests (defaults to hvp.detect.ObjectDetector).
+    the X" with no memory track scans a fresh full-res frame on
+    demand. The model loads EAGERLY at wire time (~350 MB, ~19 s on
+    2 CPU cores) so the first live query answers in ~2 s instead of
+    paying the cold start mid-conversation. Detection stays out of
+    the 10 Hz reflex loop -- update() above is the only per-tick
+    cost, a reference store. detector_factory is a seam for tests
+    (defaults to hvp.detect.ObjectDetector).
     """
     if not enabled:
         return
@@ -84,6 +129,7 @@ def wire_owl_detection(policy, latest_frame, enabled,
         from hvp.detect import ObjectDetector
         detector_factory = ObjectDetector
     policy.detector = detector_factory()
+    policy.detector.warmup()
     policy.frame_fn = latest_frame.as_pil
 
 
@@ -148,11 +194,13 @@ def main():
 
     # --- opt-in OWL-ViT: the runner keeps the latest frame; a turn
     # --- that asks for something never seen queries it on demand.
-    latest_frame = LatestFrame()
+    # --- The model loads eagerly here (~19 s on 2 cores), so the
+    # --- first live query answers fast.
+    latest_frame = LatestFrame(src=args.src)
     wire_owl_detection(policy, latest_frame, args.owl)
     if args.owl:
-        print("[owl] on-demand detection enabled (model loads lazily "
-              "on first query)", flush=True)
+        print("[owl] on-demand detection enabled (model pre-loaded at "
+              "startup)", flush=True)
 
     # --- foveal recognition: lazily loaded; classifies the fixated crop
     # --- when gaze moves (throttled) and feeds policy.memory. Off unless
@@ -216,11 +264,11 @@ def main():
         """One 100 ms audio measure through the full live loop."""
         nonlocal n_mom, n_turns, n_barges, n_dropped, drop_stale
         nonlocal last_gaze, last_recog_ms
-        # Latest frame for opt-in on-demand detection (reference store
-        # only -- the detector never runs here).
-        latest_frame.update(frame)
         t_ms = n_mom * 100.0
         now_s = t_ms / 1000.0
+        # Latest frame for opt-in on-demand detection (reference store
+        # only -- the detector never runs here).
+        latest_frame.update(frame, now_s)
         aud = (am["Tprof_n"], am["pan"])
         mono = am["mono"]
         tx.push(t_ms, mono)

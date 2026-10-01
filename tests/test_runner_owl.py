@@ -29,6 +29,10 @@ class StubDetector:
 
     def __init__(self):
         self.calls = []  # (image, queries) per live query
+        self.warmed = False
+
+    def warmup(self):
+        self.warmed = True
 
     def detect(self, image, queries, threshold=0.10):
         self.calls.append((image, list(queries)))
@@ -94,7 +98,7 @@ def test_wire_owl_disabled_leaves_policy_untouched():
     assert policy.frame_fn is None
     # And the honest-miss path still works with no detector wired.
     reply = policy.generate(Turn("Wodehaus, where is the window?", 10.0))
-    assert reply.startswith("I don't know what a window looks like yet")
+    assert reply.startswith("I don't see one right now")
 
 
 def test_latest_frame_reaches_live_query():
@@ -134,3 +138,58 @@ def test_memory_track_short_circuits_detector():
     assert holder["stub"].calls == [], \
         "known track answers from memory, no live query"
     assert reply.startswith("Looking at the window --")
+
+
+def test_detector_warmed_eagerly_at_wire_time():
+    _, _, holder = _wire()
+    assert holder["stub"].warmed, \
+        "model loads at wire time, not on the first live query"
+
+
+def _make_test_clip(path):
+    import subprocess
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10",
+         "-pix_fmt", "yuv420p", str(path)],
+        check=True)
+
+
+def test_fullres_grab_prefers_source_file(tmp_path):
+    from run_conversation import grab_frame
+    clip = tmp_path / "clip.mp4"
+    _make_test_clip(clip)
+    # Direct grab: full-res color, capped at 960 wide.
+    img = grab_frame(str(clip), 1.0)
+    assert img is not None and img.mode == "RGB"
+    assert img.size[0] == 960 and img.size[1] == 720
+    # Through LatestFrame: the live query sees the full-res frame,
+    # not the 224px reflex bytes.
+    latest = LatestFrame(src=str(clip))
+    latest.update(np.ones((224, 224), np.float32), t_s=1.0)
+    served = latest.as_pil()
+    assert served.size == (960, 720)
+
+
+def test_fullres_falls_back_for_nonfile_src():
+    # Live/URL sources have no seekable file: the 224px reflex frame
+    # is served instead of failing.
+    latest = LatestFrame(src="/nonexistent/stream-key")
+    latest.update(np.ones((224, 224), np.float32), t_s=5.0)
+    img = latest.as_pil()
+    assert img.size == (224, 224) and img.mode == "RGB"
+    assert img.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_box_coords_scale_with_frame_size():
+    # The policy maps detector boxes to 56-map by the frame's actual
+    # size, not a hardcoded /4 (which assumed 224px input).
+    policy, latest, holder = _wire()
+    latest.update(np.ones((224, 224), np.float32))
+    reply = policy.generate(Turn("Wodehaus, where is the window?", 10.0))
+    # Stub box (100,100)-(140,140) in 224-space -> center (30,30) map.
+    tracks = [tr for tr in policy.memory.tracks if tr.label == "a window"]
+    assert tracks, "detection added a memory track"
+    assert abs(tracks[0].x - 30.0) < 1e-6
+    assert abs(tracks[0].y - 30.0) < 1e-6
+    assert reply.startswith("Found the window --")

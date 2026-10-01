@@ -108,17 +108,27 @@ frame -> foveal crop (96x96 @ fixation, 2x upscale)
 weights on the Star Tours ride film (75 s, two planted questions,
 `--llm none`): "where is the window?" -> "Found the window -- looking
 at it center." (detector cleared 0.10 on the live 224 px frame);
-"where's the gate?" -> "I don't know what a gate looks like yet."
-(the hangar door scores 0.00 in pipeline grayscale -- an honest miss,
-not a confabulation). Two bugs fell out of the test: Whisper rendered
-the name as "Woat House" (added to NAME_PATTERNS) and
+"where's the gate?" -> "I don't see one right now." (the hangar door
+scores 0.00 -- an honest miss, not a confabulation). Two bugs fell
+out of the test: Whisper rendered the name as "Woat House" (added to
+NAME_PATTERNS; a later run heard "Wote House", also added) and
 extract_referent's `where(?:'s|...)` could never match because
 _normalize strips apostrophes before the regex runs (now
-`where(?:s|\s+is)`). Latency: ~22 s cold (model load), ~2.4 s warm
-per query on 2 CPU cores. Note the detector sees the reflex loop's
-224x224 grayscale frame -- it is starved relative to the full-res
-color crops the audit used; borderline scores (0.104-0.176) are the
-norm, not the exception, on this input.
+`where(?:s|\s+is)`).
+
+**Full-res upgrade (2026-10-01).** The detector was starved on the
+reflex loop's 224x224 grayscale frame, so LatestFrame now decodes a
+full-res color frame on demand from the source file at the latest
+stream timestamp (ffmpeg keyframe seek, capped 960 wide; falls back
+to the 224 px frame for live/non-file sources), and box coords map
+to the 56-map by actual frame size. The model also loads eagerly at
+`--owl` wire time (~19 s startup) instead of on the first query.
+Re-ran the same live test: gate reply in 2.7 s (was 22.6 s cold),
+window in 3.4 s. The gate STILL scores 0.00 on full-res color across
+"a gate"/"a door"/"a hangar door"/"a doorway" -- the miss is genuine
+(a head-on hangar door filling the frame doesn't read as an object
+to OWL-ViT), not a resolution artifact. Honest-miss copy is now
+"I don't see one right now."
 
 ## Audits
 

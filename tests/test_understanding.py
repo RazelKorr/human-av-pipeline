@@ -80,7 +80,7 @@ def test_understand_look_command_returns_bias():
 def test_understand_look_at_is_honest():
     reply, bias = understand("wodehaus look at the red car")
     assert bias is None
-    assert "don't know what a red car looks like" in reply
+    assert "don't see one right now" in reply
 
 
 def test_understand_see_question_uses_perception():
@@ -604,14 +604,14 @@ def test_look_at_ungrounded_lists_known():
     reply, bias = understand("wodehaus look at the red car",
                              memory=mem, t_now_ms=3000.0)
     assert bias is None
-    assert "red car" in reply
+    assert "don't see one" in reply
     assert "windows" in reply and "gate" in reply
 
 
 def test_look_at_no_memory_honest():
     reply, bias = understand("wodehaus look at the red car")
     assert bias is None
-    assert "red car" in reply
+    assert "don't see one" in reply
 
 
 def test_is_addressed_wootouse_variant():
@@ -722,7 +722,7 @@ def test_spatial_miss_stays_honest():
     reply, bias = understand("look at the leftmost red car",
                              memory=ObjectMemory(), t_now_ms=1000.0)
     assert bias is None
-    assert "don't know" in reply
+    assert "don't see one" in reply
 
 
 def test_spatial_grounded_reply():
@@ -766,7 +766,7 @@ def test_detect_not_used_for_spatial():
                              memory=mem, t_now_ms=1000.0,
                              detect_fn=lambda q: calls.append(q) or [])
     assert bias is None and not calls
-    assert "don't know" in reply
+    assert "don't see one" in reply
 
 
 def test_detect_exception_stays_honest():
@@ -776,7 +776,7 @@ def test_detect_exception_stays_honest():
                              memory=ObjectMemory(), t_now_ms=1000.0,
                              detect_fn=boom)
     assert bias is None
-    assert "don't know" in reply
+    assert "don't see one" in reply
 
 
 def test_find_and_where_is_intent():
@@ -844,7 +844,7 @@ def test_the_one_with_empty_memory_is_honest():
     d = DialogueState()
     r, b = understand("wodehaus look at the left one",
                       memory=ObjectMemory(), t_now_ms=5000.0, dialogue=d)
-    assert b is None and "left one" in r
+    assert b is None and "don't see one" in r
 
 
 def test_determiner_that_gate():

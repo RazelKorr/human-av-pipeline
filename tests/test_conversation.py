@@ -408,7 +408,8 @@ def test_policy_look_at_unknown_no_bias():
     pol.perceptual = PerceptualState(_FakeLoop(), memory=pol.memory)
     pol.memory.add("gate", 14.0, 28.0, t_ms=1000.0, conf=0.9)
     reply = pol.generate(Turn("Wodehaus, look at the red car", 3.0))
-    assert reply is not None and "red car" in reply
+    assert reply is not None and "don't see one" in reply
+    assert "gate" in reply  # known objects still listed
     assert pol.take_bias() is None
 
 

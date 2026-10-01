@@ -240,9 +240,15 @@ class ResponsePolicy:
                 # OWL-ViT wants noun phrases: "window" -> "a window".
                 dets = self.detector.detect(
                     frame, [f"a {q}" for q in queries])
+                # Boxes are in the frame's own pixel coords (the frame
+                # may be full-res now, not just the 224px reflex frame);
+                # map to 56x56 map coords by the actual frame size.
+                w, h = frame.size
                 for det in dets:
-                    mx, my = self.detector.box_center_map(det)
-                    out.append((det[0], mx, my, det[5]))
+                    label, x0, y0, x1, y1, score = det
+                    mx = (x0 + x1) / 2.0 / w * 56.0
+                    my = (y0 + y1) / 2.0 / h * 56.0
+                    out.append((label, mx, my, score))
                 return out
         reply, bias = understand(turn.text,
                                  perceptual=self.perceptual,

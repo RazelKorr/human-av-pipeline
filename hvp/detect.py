@@ -49,11 +49,16 @@ class ObjectDetector:
             self.model_id)
         self._model.eval()
 
+    def warmup(self):
+        """Load weights now so the first live query doesn't pay the
+        cold-start cost (~19 s on 2 CPU cores). Idempotent."""
+        self._ensure()
+
     def detect(self, frame_rgb, queries: list[str],
                threshold: float = 0.10):
-        """frame_rgb: PIL image (224x224). queries: free-text phrases.
+        """frame_rgb: PIL RGB image, any size. queries: free-text phrases.
 
-        Returns [(label, x0, y0, x1, y1, score)] in 224px coords,
+        Returns [(label, x0, y0, x1, y1, score)] in input-image coords,
         best first. Empty list when nothing passes the threshold.
         """
         self._ensure()
