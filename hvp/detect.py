@@ -14,6 +14,19 @@ import os
 _MODEL_ID = "google/owlvit-base-patch32"
 
 
+def pil_from_frame(frame):
+    """224x224 float32 grayscale frame (0..1) -> PIL RGB.
+
+    The runner's frames are grayscale float32; the detector takes PIL
+    RGB. Single conversion point so the runner and the tests agree on
+    exactly what bytes a live query sees.
+    """
+    import numpy as np
+    from PIL import Image
+    arr = np.clip(frame * 255.0, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr, mode="L").convert("RGB")
+
+
 class ObjectDetector:
     def __init__(self, model_id: str = _MODEL_ID):
         self.model_id = model_id

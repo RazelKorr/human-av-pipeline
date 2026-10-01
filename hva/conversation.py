@@ -81,12 +81,28 @@ class TurnDetector:
       the acoustic record shows none, and the turn is suppressed.
     - Re-fire suppression: the rolling transcriber re-emits the same
       audio with slightly different word timings across overlapping
-      windows, which defeats the word-count watermark and re-fires the
-      same utterance. A turn whose addressed span overlaps the previous
+      windows. A turn whose addressed span overlaps the previous
       fired turn's span (plus refire_margin_s) is suppressed.
 
-    Suppressed turns are recorded on self.suppressed as (reason, text)
-    with reason "no_speech" or "refire".
+    Suppressed turns are recorded on self.suppressed as
+    (reason, text, t) with reason "no_speech" or "refire" and t the
+    stream time of the suppression.
+
+    New-word tracking is by segment identity -- (start, end) rounded to
+    the millisecond -- not by word count. The rolling transcriber
+    replaces a segment in place when a later window re-emits it, which
+    shifts word positions; a positional watermark then mistakes old
+    words for new ones (or hides genuinely new words behind the cut)
+    and the detector goes deaf after the first turn.
+
+    Endpointing is on transcript evidence, not stream time: the turn
+    fires only when the latest transcription window extends past
+    last_end + silence_s (tx_time). The transcript refreshes every few
+    seconds, so "no new words for 1.5 s of stream time" is meaningless
+    between windows -- and worse, a window that cuts an utterance off
+    mid-word makes the truncated tail look like a completed turn
+    (2026-10-01: turn 1 fired as 'World House Wattoop'). tx_time=None
+    means "the transcript is current as of now_s" (unit-test default).
     """
 
     def __init__(self, silence_s: float = 1.5,
@@ -96,23 +112,35 @@ class TurnDetector:
         self.min_speech_frac = min_speech_frac
         self.refire_margin_s = refire_margin_s
         self._addressed_at: float | None = None
-        self._words_seen = 0  # word count watermark; only new words matter
+        self._seen_keys: set[tuple[float, float]] = set()
         self._last_span: tuple[float, float] | None = None
-        self.suppressed: list[tuple[str, str]] = []
+        self.suppressed: list[tuple[str, str, float]] = []
 
     def _all_words(self, segments):
         for s in segments:
             for w in s.get("words", []):
                 yield w
 
-    def _suppress(self, reason: str, text: str):
-        self.suppressed.append((reason, text))
+    @staticmethod
+    def _seg_key(segment) -> tuple[float, float]:
+        return (round(segment["start"], 3), round(segment["end"], 3))
+
+    def _suppress(self, reason: str, text: str, now_s: float):
+        self.suppressed.append((reason, text, now_s))
         self._addressed_at = None
 
-    def update(self, segments, now_s: float, speech=None) -> list[Turn]:
-        words = list(self._all_words(segments))
-        new_words = words[self._words_seen:]
-        self._words_seen = len(words)
+    def update(self, segments, now_s: float, speech=None,
+               tx_time: float | None = None) -> list[Turn]:
+        words: list[dict] = []
+        new_words: list[dict] = []
+        for s in segments:
+            key = self._seg_key(s)
+            is_new = key not in self._seen_keys
+            for w in s.get("words", []):
+                words.append(w)
+                if is_new:
+                    new_words.append(w)
+            self._seen_keys.add(key)
         if not words:
             return []
 
@@ -127,8 +155,14 @@ class TurnDetector:
             return []
 
         last_end = max(w["end"] for w in words)
-        if now_s - last_end < self.silence_s:
-            return []  # still talking
+        # Endpoint on transcript evidence: the latest window must extend
+        # past last_end + silence_s. Stream time alone can't endpoint --
+        # the transcript only refreshes every few seconds, and a window
+        # that truncates an utterance would otherwise fire on the
+        # truncated tail as if the speaker had stopped.
+        evidence_time = now_s if tx_time is None else tx_time
+        if evidence_time - last_end < self.silence_s:
+            return []  # still talking (or evidence too stale to tell)
 
         # Utterance complete. Collect the addressed span.
         span = [w.get("word", "").strip()
@@ -139,14 +173,14 @@ class TurnDetector:
         # Guard 1: same utterance re-emitted by an overlapping window.
         if (self._last_span is not None
                 and addressed_at < self._last_span[1] + self.refire_margin_s):
-            self._suppress("refire", text)
+            self._suppress("refire", text, now_s)
             return []
 
         # Guard 2: the transcript's speech claim must agree with the
         # acoustic record over the addressed span.
         if speech is not None:
             if speech(addressed_at, span_end) < self.min_speech_frac:
-                self._suppress("no_speech", text)
+                self._suppress("no_speech", text, now_s)
                 return []
 
         turn = Turn(text=text, t_end=span_end, t_start=addressed_at)

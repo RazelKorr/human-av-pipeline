@@ -127,3 +127,105 @@ def test_stream_video_matches_batch_decoder():
     assert len(stream_frames) == len(batch_frames) == 50
     for i, (s, b) in enumerate(zip(stream_frames, batch_frames)):
         assert np.array_equal(s, b), f"frame {i} differs between stream and batch"
+
+
+def test_rolling_transcriber_replaces_overlapping_segments(monkeypatch):
+    """Later windows overwrite earlier segments they overlap.
+
+    Regression (2026-09-30): stitching purely by start time let every
+    window's re-emission accumulate as a duplicate segment, and the
+    turn detector's watermark then treated old re-emissions as new
+    words -- the detector went deaf after the first turn.
+    """
+    from hva import transcribe as TR
+    from hva.stream import RollingTranscriber
+
+    calls = {"n": 0}
+
+    def fake_transcribe(audio, model_size="base", prompt=None, **kw):
+        calls["n"] += 1
+        # Same utterance re-emitted by the second window, shifted 50 ms.
+        shift = 0.0 if calls["n"] == 1 else 0.05
+        seg = {"start": 4.70 + shift, "end": 5.70 + shift,
+               "text": "Woodhouse hi", "avg_logprob": -0.1,
+               "words": [
+                   {"word": "Woodhouse", "start": 4.70 + shift,
+                    "end": 5.10 + shift, "prob": 0.9},
+                   {"word": "hi", "start": 5.20 + shift,
+                    "end": 5.50 + shift, "prob": 0.9}]}
+        # The second window also catches a new utterance; it must survive.
+        if calls["n"] == 2:
+            return [seg, {"start": 28.50, "end": 29.50,
+                          "text": "Woodhouse left", "avg_logprob": -0.1,
+                          "words": [
+                              {"word": "Woodhouse", "start": 28.50,
+                               "end": 28.90, "prob": 0.9},
+                              {"word": "left", "start": 29.00,
+                               "end": 29.40, "prob": 0.9}]}]
+        return [seg]
+
+    monkeypatch.setattr(TR, "transcribe_audio", fake_transcribe)
+    tx = RollingTranscriber(model_size="base", window_s=10.0, step_s=3.0)
+    mono = np.zeros(1600, dtype=np.float32)
+    # Drive stream time to 3 s -> first transcription, then to 6 s.
+    for ms in range(0, 3100, 100):
+        tx.push(float(ms), mono)
+    assert calls["n"] == 1
+    assert len(tx.segments) == 1
+    for ms in range(3100, 6100, 100):
+        tx.push(float(ms), mono)
+    assert calls["n"] == 2
+    # The re-emission replaced the original; the new utterance was kept.
+    assert len(tx.segments) == 2, (
+        f"expected 2 stitched segments, got {len(tx.segments)}: "
+        f"{[(k, v['text']) for k, v in tx.segments.items()]}")
+    texts = sorted(v["text"] for v in tx.segments.values())
+    assert texts == ["Woodhouse hi", "Woodhouse left"]
+    # The surviving first-utterance segment is the later window's timing:
+    # the 50 ms re-emission shift, minus the 100 ms reservoir lead
+    # (push() appends the current tick before the window fires).
+    assert not any(abs(k[0] - 4.6) < 1e-9 for k in tx.segments)
+    first = min(tx.segments.values(), key=lambda s: s["start"])
+    assert abs(first["start"] - 4.65) < 1e-9
+
+
+def test_rolling_transcriber_fragment_does_not_clobber_full_segment(
+        monkeypatch):
+    """A later window's fragmentary re-emission must not displace the
+    complete segment ("To the left, please." over "World House, look to
+    the left, please." -- 2026-10-01 live-run failure)."""
+    from hva import transcribe as TR
+    from hva.stream import RollingTranscriber
+
+    full = {"start": 27.49, "end": 30.19,
+            "text": "World House, look to the left, please.",
+            "avg_logprob": -0.1,
+            "words": [{"word": w, "start": 27.49 + 0.3 * i,
+                       "end": 27.79 + 0.3 * i, "prob": 0.9}
+                      for i, w in enumerate(
+                          "World House look to the left please".split())]}
+    frag = {"start": 29.00, "end": 30.18, "text": "To the left, please.",
+            "avg_logprob": -0.1,
+            "words": [{"word": w, "start": 29.00 + 0.3 * i,
+                       "end": 29.30 + 0.3 * i, "prob": 0.9}
+                      for i, w in enumerate("To the left please".split())]}
+
+    calls = {"n": 0}
+
+    def fake_transcribe(audio, model_size="base", prompt=None, **kw):
+        calls["n"] += 1
+        return [full] if calls["n"] == 1 else [frag]
+
+    monkeypatch.setattr(TR, "transcribe_audio", fake_transcribe)
+    tx = RollingTranscriber(model_size="base", window_s=10.0, step_s=3.0)
+    mono = np.zeros(1600, dtype=np.float32)
+    for ms in range(0, 3100, 100):
+        tx.push(float(ms), mono)
+    assert len(tx.segments) == 1
+    for ms in range(3100, 6100, 100):
+        tx.push(float(ms), mono)
+    # The 4-word fragment overlaps the 7-word segment but may not
+    # displace it: the complete segment survives.
+    assert len(tx.segments) == 1
+    only = next(iter(tx.segments.values()))
+    assert only["text"] == "World House, look to the left, please."

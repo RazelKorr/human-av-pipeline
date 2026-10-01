@@ -95,7 +95,13 @@ frame -> foveal crop (96x96 @ fixation, 2x upscale)
              policy.detector + policy.frame_fn wire the detection
              fallback; LLM payload inherits objects via describe()
              AND the recognition layer (build_payload's
-             recognized_objects: label, region, track confidence)
+             recognized_objects: label, region, track confidence).
+             scripts/run_conversation.py wires the fallback opt-in:
+             --owl sets policy.detector to ObjectDetector and
+             policy.frame_fn to the runner's latest frame
+             (LatestFrame.as_pil); the detector still only fires
+             inside the turn handler's last-resort path, never in
+             the 10 Hz tick loop.
 ```
 
 ## Audits

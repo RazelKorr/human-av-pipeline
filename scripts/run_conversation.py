@@ -41,6 +41,50 @@ from hva.conversation import (TurnDetector, ResponsePolicy, Speaker,
 from hva.understanding import PerceptualState
 from hvp.recognize import (FovealClassifier, GENERAL_VOCAB,
                            DARK_STREET_VOCAB, foveal_crop_pil)
+from hvp.detect import pil_from_frame
+
+
+class LatestFrame:
+    """The runner's most recent 224x224 frame, served as PIL RGB.
+
+    process_measure() calls update() once per tick; policy.frame_fn is
+    this object's as_pil. The 10 Hz loop only stores the frame -- the
+    detector itself runs solely inside the turn handler (generate ->
+    understand's last-resort path), i.e. on demand, never per tick.
+    """
+
+    def __init__(self):
+        self.frame = None  # 224x224 float32 in 0..1, or None
+
+    def update(self, frame):
+        if frame is not None:
+            self.frame = frame
+
+    def as_pil(self):
+        """PIL RGB of the latest frame, or None if no frame seen yet."""
+        if self.frame is None:
+            return None
+        return pil_from_frame(self.frame)
+
+
+def wire_owl_detection(policy, latest_frame, enabled,
+                       detector_factory=None):
+    """Opt-in OWL-ViT for the live conversation loop.
+
+    Sets policy.detector / policy.frame_fn so "where is the X" / "find
+    the X" with no memory track scans the runner's latest frame. The
+    model loads lazily on the first query (~350 MB, ~2 s/query CPU);
+    detection stays out of the 10 Hz reflex loop -- update() above is
+    the only per-tick cost, a reference store. detector_factory is a
+    seam for tests (defaults to hvp.detect.ObjectDetector).
+    """
+    if not enabled:
+        return
+    if detector_factory is None:
+        from hvp.detect import ObjectDetector
+        detector_factory = ObjectDetector
+    policy.detector = detector_factory()
+    policy.frame_fn = latest_frame.as_pil
 
 
 def main():
@@ -58,16 +102,24 @@ def main():
                          "policy.memory ('what do you see?' / 'look at "
                          "the X'): none=off, general=open-world labels, "
                          "dark-street=Star-Tours gate/corridor labels")
+    ap.add_argument("--owl", action="store_true",
+                    help="opt-in on-demand OWL-ViT detection: 'where is the "
+                         "X' / 'find the X' with no memory track scans the "
+                         "latest frame (lazy model load, ~2 s/query CPU, "
+                         "never in the 10 Hz tick loop)")
     ap.add_argument("--tx-window", type=float, default=10.0,
                     help="transcription window s (smaller = more responsive)")
     ap.add_argument("--tx-step", type=float, default=3.0)
     ap.add_argument("--llm", default="none",
-                    choices=["none", "api", "local", "hf", "free", "auto"],
+                    choices=["none", "api", "local", "hf", "free", "agent",
+                             "auto"],
                     help="language-model backend for ResponsePolicy: "
                          "none=rule-based only, api=Anthropic (needs "
                          "ANTHROPIC_API_KEY), local=llama-server at --llm-url, "
                          "hf=HuggingFace Inference (needs HF_TOKEN, free tier), "
                          "free=Pollinations.ai (no account, no key), "
+                         "agent=file handoff in handoff/ (an operator answers "
+                         "each turn), "
                          "auto=local if reachable else hf if tokened else "
                          "api if keyed else free else none")
     ap.add_argument("--llm-url", default="http://localhost:8080",
@@ -93,6 +145,14 @@ def main():
     detector = TurnDetector(silence_s=1.5)
     policy = ResponsePolicy()
     policy.perceptual = PerceptualState(loop, memory=policy.memory)
+
+    # --- opt-in OWL-ViT: the runner keeps the latest frame; a turn
+    # --- that asks for something never seen queries it on demand.
+    latest_frame = LatestFrame()
+    wire_owl_detection(policy, latest_frame, args.owl)
+    if args.owl:
+        print("[owl] on-demand detection enabled (model loads lazily "
+              "on first query)", flush=True)
 
     # --- foveal recognition: lazily loaded; classifies the fixated crop
     # --- when gaze moves (throttled) and feeds policy.memory. Off unless
@@ -156,6 +216,9 @@ def main():
         """One 100 ms audio measure through the full live loop."""
         nonlocal n_mom, n_turns, n_barges, n_dropped, drop_stale
         nonlocal last_gaze, last_recog_ms
+        # Latest frame for opt-in on-demand detection (reference store
+        # only -- the detector never runs here).
+        latest_frame.update(frame)
         t_ms = n_mom * 100.0
         now_s = t_ms / 1000.0
         aud = (am["Tprof_n"], am["pan"])
@@ -186,7 +249,10 @@ def main():
 
         # --- perception tick (with any language bias from last turn)
         # --- This never blocks on TTS: synthesis lives in AsyncTTS.
-        loop.tick(t_ms, vis, aud, sp, task_bias=policy.take_bias())
+        bias = policy.take_bias()
+        if bias is not None:
+            note("perceptual bias applied (look command)")
+        loop.tick(t_ms, vis, aud, sp, task_bias=bias)
 
         # --- foveal recognition: the label stream for "what do you see?"
         # --- and "look at the X". Classifies the fixated crop when gaze
@@ -219,9 +285,13 @@ def main():
 
         # --- turn detection on transcribed-so-far words, guarded by
         # --- the acoustic record (hallucinated speech over silence
-        # --- is suppressed) and by re-fire suppression.
+        # --- is suppressed) and by re-fire suppression. Endpointing
+        # --- uses the latest transcription window's time, not the tick
+        # --- clock, so a window that truncates an utterance can't fire
+        # --- on the truncated tail.
         for turn in detector.update(tx.transcript(), now_s,
-                                    speech=speech_fraction):
+                                    speech=speech_fraction,
+                                    tx_time=tx.last_tx_time):
             n_turns += 1
             note(f"TURN: {turn.text!r}")
             t0 = time.time()
@@ -272,11 +342,15 @@ def main():
     note(f"stream ended: {n_mom} moments, {n_turns} turns, "
          f"{n_barges} barge-ins, {n_dropped} dropped (stale synthesis), "
          f"{len(detector.suppressed)} suppressed "
-         f"({sum(1 for r, _ in detector.suppressed if r == 'no_speech')} "
+         f"({sum(1 for r, _, _ in detector.suppressed if r == 'no_speech')} "
          f"no_speech, "
-         f"{sum(1 for r, _ in detector.suppressed if r == 'refire')} refire)")
-    for reason, text in detector.suppressed:
-        note(f"SUPPRESSED ({reason}): {text!r}")
+         f"{sum(1 for r, _, _ in detector.suppressed if r == 'refire')} refire)")
+    for reason, text, t in detector.suppressed:
+        # Suppressions print at stream end, so they carry the stream
+        # time they actually happened at -- not the final timestamp.
+        line = f"[t={t:6.1f}s] SUPPRESSED ({reason}): {text!r}"
+        print(line, flush=True)
+        log.append(line)
     with open(os.path.join(args.outdir, "conversation.log"), "w") as f:
         f.write("\n".join(log) + "\n")
 

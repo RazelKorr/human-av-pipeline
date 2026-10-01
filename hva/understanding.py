@@ -55,6 +55,13 @@ NAME_PATTERNS = [
     r"would\s+house",   # Whisper heard "Hi Wodehaus" as "I would house"
     r"what\s+house",
     r"woo\s*touse",     # Whisper heard "Hey Wodehaus" as "Hey, WooTouse"
+    # 2026-10-01: the live demuxed audio path renders the name as
+    # "World House" in every window ("Woodhouse, look to the left" ->
+    # "World House, look to the left"); the batch decode path rendered
+    # "Woodhouse". Without this the turn detector goes deaf to real
+    # addresses whenever Whisper picks the "world" spelling.
+    r"world\s+house",
+    r"word\s+house",    # expected neighbor of the above
 ]
 
 

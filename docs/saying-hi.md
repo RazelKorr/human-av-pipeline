@@ -64,7 +64,9 @@ suppression** — a turn whose span overlaps the previous fired
 turn's span (+`refire_margin_s`, default 1.0 s) is suppressed as
 `refire`, defeating duplicate turns from overlapping transcription
 windows re-emitting the same utterance. Suppressed turns are
-recorded on `detector.suppressed` as `(reason, text)`.
+recorded on `detector.suppressed` as `(reason, text, t)` -- the
+stream time the suppression actually happened at, since they print
+at stream end.
 Only reasons over transcribed words — it never claims to have heard
 what the transcriber hasn't produced yet.
 
@@ -80,8 +82,12 @@ account, no key, rate-limited by IP. Dialogue and perceptual
 snapshots travel in the request body, but it is still a
 third-party/public service with no SLA and no model guarantee, so
 non-sensitive prototyping only), or `LocalGenerator` (llama-server
-at `--llm-url`) via `--llm {none,api,local,hf,free,auto}`
-(`--hf-model` / `--free-model` override the models). `auto` tries
+at `--llm-url`) via `--llm {none,api,local,hf,free,agent,auto}`
+(`--hf-model` / `--free-model` override the models). `agent` is the
+file handoff: each turn's grounded prompt is written to
+`handoff/turn-NNNN.prompt.json` and the reply is read back from
+`handoff/turn-NNNN.response.txt` (an operator answers; 15-minute
+timeout, then the rule-based fallback). `auto` tries
 local, then HF, then API, then the keyless free backend — free before
 paid, your own credentials before a public gateway.
 A trailing `LOOK: <direction>` line in the LLM reply is stripped before
@@ -179,13 +185,16 @@ the stale response is dropped instead of played.
 
 **Streaming playback (2026-09-30):** setting `HVA_AUDIO_PLAYER` (e.g. `"ffplay -nodisp -autoexit -"`) switches the Speaker from simulated timing to real audio: `tts speak --stream` pipes MP3 bytes straight into the player, so speech starts at first-byte latency instead of after full synthesis. Barge-in is a pipe-kill -- the player is terminated first, then the synthesizer -- and a pump thread tees every chunk to `output/conversation/reply_NN.mp3`, so the audit record is identical in both modes. Shutdown is deterministic: the pump waits on a stop event with a bounded select, never on EOF from the tts pipe (the tts CLI can fork daemon children that inherit its stdout and outlive it, which used to hang the pump and crash it against the closed record file). Without `HVA_AUDIO_PLAYER` set, behavior is byte-identical to before.
 
-**Phantom turns on long silence (observed 2026-09-30):** Whisper can
-hallucinate speech -- prompt-colored toward the system's name -- on
-several seconds of near-silence, and the turn detector will fire on the
-phantom (name + 1.5 s silence both check out). The reply stays honest
-because it is grounded in the perceptual snapshot, but a phantom look
-command still steers the shared map. This was observed on a synthetic
-file with 6 s of digital zeros; real room tone makes it rarer, but it is
-a known model-level behavior, not a stitching bug (overlapping windows
-dedupe by segment-start key). No heuristic filter yet -- the honest
-grounding keeps the failure benign.
+**Phantom turns on long silence (observed 2026-09-30, guarded
+2026-10-01):** Whisper can hallucinate speech -- prompt-colored
+toward the system's name -- on several seconds of near-silence, and
+the turn detector used to fire on the phantom (name + 1.5 s silence
+both checked out). The acoustic-agreement guard now suppresses
+these: the addressed span must clear `min_speech_frac` (default 0.2)
+of acoustic speech energy from the per-tick VAD history, otherwise
+the turn is suppressed as `no_speech`. The reply stays honest
+because it is grounded in the perceptual snapshot, but a phantom
+look command still steers the shared map. This was observed on a
+synthetic file with 6 s of digital zeros; real room tone makes it
+rarer, but it is a known model-level behavior, not a stitching bug
+(overlapping windows dedupe by segment-start key).

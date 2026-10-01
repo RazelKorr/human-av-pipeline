@@ -8,3 +8,6 @@ __pycache__/
 *.npz
 .DS_Store
 models/
+# local-only: agent-in-the-loop handoff files, venv
+handoff/
+.venv/

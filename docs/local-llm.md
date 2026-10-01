@@ -8,7 +8,7 @@ desktop (no API, no network, fully local).
 - Intel Core i7-7700K @ 4.20 GHz
 - 32 GB RAM
 - Radeon RX 580 8 GB (no NVIDIA -- CUDA is out; llama.cpp via Vulkan)
-- localllama already installed
+- LM Studio installed (corrected 2026-09-30; earlier note said LocalLlama)
 
 ## Model rec (researched 2026-09-30)
 
@@ -29,16 +29,24 @@ Newest: **Qwen3.5-4B** (~2.7 GB)
 Q4_K_M is the sweet spot. Q3 and below degrade instruction following;
 Q5/Q6 are nicer if RAM allows.
 
-## Install
+## Install (Windows, RX 580)
+
+1. Grab the latest release from https://github.com/ggml-org/llama.cpp/releases — the zip with `win-vulkan-x64` in the name — and extract it somewhere simple like `C:\llama`. Make sure your AMD Adrenalin drivers are current; Vulkan comes with them.
+2. Open a terminal in that folder and run:
 
 ```bash
-# serve it (Vulkan build of llama.cpp for the RX 580)
-llama-server -hf Qwen/Qwen3-8B-GGUF:Q4_K_M --port 8080
+# downloads the model (~5 GB) on first run, then serves it
+llama-server -hf unsloth/Qwen3-8B-GGUF:Q4_K_M --port 8080
+```
 
-# in another shell
+Leave that window open. In another shell:
+
+```bash
 git clone https://github.com/RazelKorr/human-av-pipeline
 cd human-av-pipeline
 ```
+
+Then run the conversation loop with `--llm local` (it defaults to `http://localhost:8080`; `--llm-url` overrides).
 
 ## Staple it (one line)
 

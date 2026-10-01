@@ -401,11 +401,16 @@ class RollingTranscriber:
         self.buf: list[np.ndarray] = []
         self.n_buf = 0
         self.next_tx = step_s
-        self.segments: dict[float, dict] = {}
+        self.segments: dict[tuple[float, float], dict] = {}
         self.words: list[tuple[float, float]] = []   # (start, end)
         self._carry = 0.0
         self._decay = float(np.exp(-100.0 / 300.0))
         self.n_transcriptions = 0
+        # Stream time the latest transcription window ends at. The turn
+        # detector endpoints on this, not on the tick clock: a window
+        # that cuts an utterance off must not read as the speaker
+        # having stopped (2026-10-01).
+        self.last_tx_time: float | None = None
 
     def push(self, t_ms: float, mono: np.ndarray):
         self.buf.append(mono)
@@ -422,6 +427,7 @@ class RollingTranscriber:
                 self.next_tx += self.step_s
 
     def _transcribe(self, t_s: float):
+        self.last_tx_time = t_s
         audio = np.concatenate(self.buf)
         t0 = t_s - len(audio) / AUDIO_SR   # reservoir start in stream time
         segs = TR.transcribe_audio(audio, model_size=self.model_size,
@@ -433,7 +439,30 @@ class RollingTranscriber:
             s2["words"] = [dict(w, start=w["start"] + t0,
                                 end=w["end"] + t0)
                            for w in s["words"]]
-            self.segments[round(s2["start"], 3)] = s2
+            # Overlap-stitch: a later window re-emits the audio it shares
+            # with earlier windows, with slightly shifted timings, so
+            # stitching purely by start time accumulates duplicates of
+            # every utterance. A later window may only displace an
+            # overlapping segment it fully supersedes (at least as many
+            # words): the replacement's new key would otherwise make the
+            # TurnDetector treat old re-emissions as new words and go deaf
+            # after the first turn (2026-09-30). And a fragmentary
+            # re-emission -- e.g. "To the left, please." over the earlier
+            # complete "World House, look to the left, please." -- must not
+            # clobber the full segment (2026-10-01).
+            key = (round(s2["start"], 3), round(s2["end"], 3))
+            if key in self.segments:
+                continue  # identical re-emission
+            overlapped = [k for k, old in self.segments.items()
+                          if old["start"] < s2["end"]
+                          and s2["start"] < old["end"]]
+            n_new = len(s2.get("words", []))
+            if all(len(self.segments[k].get("words", [])) <= n_new
+                   for k in overlapped):
+                for k in overlapped:
+                    del self.segments[k]
+                self.segments[key] = s2
+            # else: keep the fuller existing segment(s); drop the fragment.
         self.words = sorted(
             (w["start"], w["end"])
             for s in self.segments.values() for w in s["words"])

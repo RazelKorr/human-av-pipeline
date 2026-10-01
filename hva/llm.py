@@ -136,6 +136,64 @@ class LocalGenerator:
         return data["choices"][0]["message"]["content"].strip()
 
 
+class AgentGenerator:
+    """File-handoff backend: an operator (human or AI agent) in the loop.
+
+    generate(payload) writes handoff/turn-NNNN.prompt.json and blocks
+    until handoff/turn-NNNN.response.txt appears, then returns its
+    text. The operator reads the prompt file, writes the reply file,
+    and the conversation continues. The wait is bounded (default 15
+    min); on timeout it raises and ResponsePolicy falls back to the
+    rule-based understand() -- the rules are the floor, same as the
+    other backends.
+
+    Additive and opt-in: select with --llm agent. Nothing about the
+    other backends changes. Handoff dir overridable via HANDOFF_DIR.
+    """
+
+    def __init__(self, handoff_dir: str | None = None,
+                 poll_s: float = 2.0, timeout_s: float = 900.0):
+        self.handoff_dir = handoff_dir or os.environ.get(
+            "HANDOFF_DIR", "handoff")
+        self.poll_s = poll_s
+        self.timeout_s = timeout_s
+        self._n = 0
+        os.makedirs(self.handoff_dir, exist_ok=True)
+
+    @property
+    def available(self) -> bool:
+        return True  # the operator is the credential
+
+    def _paths(self, n: int):
+        base = os.path.join(self.handoff_dir, f"turn-{n:04d}")
+        return base + ".prompt.json", base + ".response.txt"
+
+    def generate(self, payload: dict) -> str:
+        """Returns reply text (with any LOOK line still attached)."""
+        import time
+        self._n += 1
+        prompt_path, response_path = self._paths(self._n)
+        with open(prompt_path, "w") as f:
+            json.dump({"system": SYSTEM_PROMPT,
+                       "payload": payload,
+                       "instruction": "Respond to the turn."},
+                      f, indent=1)
+        print(f"[agent-llm] prompt -> {prompt_path}; "
+              f"waiting for {response_path}", flush=True)
+        deadline = time.time() + self.timeout_s
+        while time.time() < deadline:
+            if os.path.exists(response_path):
+                with open(response_path) as f:
+                    text = f.read().strip()
+                print(f"[agent-llm] response <- {response_path}",
+                      flush=True)
+                return text
+            time.sleep(self.poll_s)
+        raise TimeoutError(
+            f"no agent response within {self.timeout_s:.0f}s "
+            f"(wrote {prompt_path})")
+
+
 class HFGenerator:
     """HuggingFace Inference Providers backend (OpenAI-compatible).
 
@@ -312,9 +370,11 @@ def select_llm_backend(choice: str = "none",
     so a stray ANTHROPIC_API_KEY or HF_TOKEN never spends money or
     quota without an explicit flag.
 
-    choice: "none" | "api" | "local" | "hf" | "free" | "auto"
+    choice: "none" | "api" | "local" | "hf" | "free" | "agent" | "auto"
       free = Pollinations.ai OpenAI-compatible POST endpoint
              (keyless JSON body): no account, no key.
+      agent = file-handoff backend (handoff/turn-NNNN.prompt.json ->
+              turn-NNNN.response.txt): an operator answers each turn.
       auto tries local llama-server first, then HuggingFace (free tier)
       if tokened, then API if keyed, then the keyless free backend,
       else none. Free before paid; your own credentials before a
@@ -322,6 +382,9 @@ def select_llm_backend(choice: str = "none",
     """
     if choice == "none":
         return None, "none (rule-based)"
+    if choice == "agent":
+        gen = AgentGenerator()
+        return gen, f"agent (file handoff @ {gen.handoff_dir}/)"
     if choice == "local":
         gen = LocalGenerator(base_url=llm_url)
         return (gen if gen.available else None,

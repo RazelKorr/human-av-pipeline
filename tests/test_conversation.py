@@ -24,6 +24,7 @@ def test_is_addressed_matches_whisper_variants():
     assert is_addressed("hello woodhouse")
     assert is_addressed("I would house, can you hear me?")  # observed 2026-09-30
     assert is_addressed("hey what house")
+    assert is_addressed("World House, look to the left, please.")  # observed 2026-10-01
     assert not is_addressed("hi there, can you hear me?")
     assert not is_addressed("the house is blue")
 
@@ -67,7 +68,7 @@ def test_turn_detector_suppresses_hallucination_over_silence():
     # No acoustic speech anywhere near the claimed span.
     turns = det.update(segs, 13.0, speech=_speech_frac([]))
     assert turns == []
-    assert det.suppressed == [("no_speech", "Woodhouse look left")]
+    assert det.suppressed == [("no_speech", "Woodhouse look left", 13.0)]
 
 
 def test_turn_detector_fires_when_acoustics_agree():
@@ -114,6 +115,41 @@ def test_turn_detector_allows_genuine_repeat():
     turns = det.update(segs, 23.0, speech=speech)
     assert len(turns) == 1
     assert "right" in turns[0].text
+
+
+def test_turn_detector_second_turn_after_replacement_reemission():
+    """Regression (2026-09-30): the rolling transcriber replaces a
+    segment in place when a later window re-emits it with shifted
+    timings. The replacement's words must count as new -- with the old
+    word-count watermark they didn't, and the detector went deaf after
+    the first turn (turns 2 and 3 of the agent-handoff test never
+    fired)."""
+    det = TurnDetector(silence_s=1.5)
+    speech = _speech_frac([(0.0, 100.0)])
+    seg1 = _seg([("Woodhouse", 4.7, 5.1), ("what", 5.2, 5.4),
+                 ("see", 5.5, 5.8)])
+    assert len(det.update([seg1], 9.0, speech=speech)) == 1
+    # Later window re-emits utterance 1 with shifted timings: the
+    # transcriber replaces the segment (new identity, same span).
+    seg1b = _seg([("Woodhouse", 4.8, 5.2), ("what", 5.3, 5.5),
+                  ("see", 5.6, 5.9)])
+    assert det.update([seg1b], 12.0, speech=speech) == []
+    assert det.suppressed[-1][0] == "refire"
+    # A genuine second address arrives as a new segment: it must fire.
+    seg2 = _seg([("Woodhouse", 28.5, 28.9), ("left", 29.0, 29.3)])
+    turns = det.update([seg1b, seg2], 33.0, speech=speech)
+    assert len(turns) == 1
+    assert "left" in turns[0].text
+
+
+def test_turn_detector_suppressions_carry_stream_time():
+    """Suppressed turns record when they happened, so the end-of-run
+    log doesn't stamp them all with the final timestamp."""
+    det = TurnDetector(silence_s=1.5)
+    segs = [_seg([("Woodhouse", 10.0, 10.4), ("look", 10.5, 10.7),
+                  ("left", 10.8, 11.0)])]
+    det.update(segs, 13.0, speech=_speech_frac([]))
+    assert det.suppressed == [("no_speech", "Woodhouse look left", 13.0)]
 
 
 def test_energy_vad_exposes_per_tick_presence():
@@ -413,3 +449,25 @@ def test_policy_detector_wiring():
     assert (ix, iy) == (40, 20)
     # the detection became a track in policy memory
     assert pol.memory.locate("gate", 2000.0) is not None
+
+
+def test_turn_detector_does_not_fire_on_truncated_window_tail():
+    """Regression (2026-10-01): a transcription window that cuts an
+    utterance off mid-word makes the truncated tail look like a
+    completed turn to a stream-time silence check (turn 1 fired as
+    'World House Wattoop'). The detector must endpoint on transcript
+    evidence -- the latest window has to extend past
+    last_end + silence_s -- so the turn waits for a window that
+    actually contains the utterance's end."""
+    det = TurnDetector(silence_s=1.5)
+    speech = _speech_frac([(0.0, 100.0)])
+    # Window ending at t=6 cuts the utterance off: "what do you s-".
+    cut = [_seg([("Woodhouse", 4.8, 5.2), ("what", 5.3, 5.5),
+                 ("do", 5.6, 5.7), ("you", 5.8, 5.9), ("s", 5.9, 6.0)])]
+    assert det.update(cut, 7.5, speech=speech, tx_time=6.0) == []
+    # Next window (ends t=9) holds the whole utterance: fires, complete.
+    full = [_seg([("Woodhouse", 4.8, 5.2), ("what", 5.3, 5.5),
+                  ("do", 5.6, 5.7), ("you", 5.8, 6.0), ("see", 6.1, 6.7)])]
+    turns = det.update(full, 9.0, speech=speech, tx_time=9.0)
+    assert len(turns) == 1
+    assert turns[0].text == "Woodhouse what do you see"
