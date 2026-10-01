@@ -82,7 +82,14 @@ class ObjectDetector:
         return dets
 
     @staticmethod
-    def box_center_map(det) -> tuple[float, float]:
-        """Box center in 56x56 map coords."""
+    def box_center_map(det, frame_w: int,
+                       frame_h: int) -> tuple[float, float]:
+        """Box center in 56x56 map coords.
+
+        The frame size is REQUIRED: detect() accepts any-size images,
+        and the old hardcoded /4 (224px reflex frame) silently mapped
+        full-res boxes to the wrong quarter of the map (2026-10-01).
+        """
         _, x0, y0, x1, y1, _ = det
-        return ((x0 + x1) / 2.0 / 4.0, (y0 + y1) / 2.0 / 4.0)
+        return ((x0 + x1) / 2.0 / frame_w * 56.0,
+                (y0 + y1) / 2.0 / frame_h * 56.0)

@@ -8,8 +8,6 @@ the eye jumps from the previous fixation to the new one, taking
 suppressed -- the percept holds the pre-saccadic frame, no smear.
 """
 
-from . import baseline as B
-
 
 # --- darkness behavior (RazelKorr, 2026-09-29) ---
 # In near-black frames human eyes don't keep saccading on noise: focus

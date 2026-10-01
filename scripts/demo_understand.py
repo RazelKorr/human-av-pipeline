@@ -19,7 +19,6 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hvm.online import OnlineLevel3
-from hva.conversation import Turn
 from hva.understanding import (PerceptualState, DialogueState, understand,
                                direction_bias)
 

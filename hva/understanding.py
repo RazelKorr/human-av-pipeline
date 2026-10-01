@@ -119,7 +119,10 @@ def classify(text: str) -> str:
     if m:
         return Intent.LOOK_COMMAND
     if re.search(r"\blook at\b|\blook toward|\bfind the\b|"
-                 r"\bwhere is\b|\bwheres\b|where's|\blocate the\b", norm):
+                 r"\bwhere is\b|\bwheres\b|\blocate the\b", norm):
+        # NB: no where's alternative -- _normalize strips apostrophes,
+        # so "where's" arrives as "wheres" (same landmine fixed in
+        # extract_referent 2026-10-01).
         return Intent.LOOK_AT
     if re.search(r"\bthank", norm):
         return Intent.THANKS
@@ -721,11 +724,11 @@ def understand(turn_text: str,
         # Grounded fallback: report the perceptual state honestly
         # instead of confabulating an answer.
         if perceptual is not None and intent == Intent.WH_QUESTION:
-            reply = (f"I heard your question: {turn_text.strip()} "
+            reply = (f"I heard your question: {turn_text.strip()}. "
                      f"I don't understand it well enough to answer, but "
                      f"here's where I am: {perceptual.describe()}")
         else:
-            reply = (f"I heard your question: {turn_text.strip()} "
+            reply = (f"I heard your question: {turn_text.strip()}. "
                      f"I can hear the words, but I don't understand "
                      f"them yet.")
     elif intent == Intent.STATEMENT:

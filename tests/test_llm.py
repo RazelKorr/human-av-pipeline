@@ -67,7 +67,6 @@ def test_policy_llm_path_receives_memory(monkeypatch):
 # --- AgentGenerator (file-handoff backend) ---
 
 import json
-import os
 
 from hva.llm import AgentGenerator, select_llm_backend
 

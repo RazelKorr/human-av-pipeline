@@ -213,7 +213,9 @@ class ResponsePolicy:
         self.pending_bias = None  # 56x56 array for the tick loop, or None
         self.llm = None  # hva.llm.ApiGenerator or compatible
         self.detector = None  # hvp.detect.ObjectDetector or compatible
-        self.frame_fn = None  # () -> PIL 224x224 RGB frame or None
+        self.frame_fn = None  # () -> PIL RGB frame or None (may be a
+        # full-res color grab, not just the 224px reflex frame; the
+        # detector path maps boxes by the frame's actual size)
 
     def generate(self, turn: Turn) -> str | None:
         if not is_addressed(turn.text):

@@ -435,11 +435,6 @@ def test_policy_detector_wiring():
             assert queries == ["a gate"], queries
             return [("a gate", 150.0, 70.0, 170.0, 90.0, 0.55)]
 
-        @staticmethod
-        def box_center_map(det):
-            _, x0, y0, x1, y1, _ = det
-            return ((x0 + x1) / 2.0 / 4.0, (y0 + y1) / 2.0 / 4.0)
-
     pol = ResponsePolicy()
     pol.detector = StubDetector()
     pol.frame_fn = lambda: Image.new("RGB", (224, 224))

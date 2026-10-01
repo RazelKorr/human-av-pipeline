@@ -16,7 +16,6 @@ Usage: python3 scripts/watch.py <video.mp4> [--seconds N] [--wav track.wav]
   --wav : use this 16 kHz mono wav instead of extracting audio from the video.
 """
 
-import json
 import os
 import subprocess
 import sys

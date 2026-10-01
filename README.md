@@ -86,12 +86,15 @@ hallucinated turns by acoustic agreement and re-fire suppression)
 -> `AsyncTTS` (non-blocking synthesis so the 10 Hz tick never stalls).
 Live duplex with `EnergyVAD` barge-in: if you speak mid-response,
 playback stops and the turn is re-taken. `--llm
-{none,api,local,hf,free,auto}` selects the language-model backend
-(default `none`; `auto` tries local llama-server, then HuggingFace
-(free tier) if `HF_TOKEN` is set, then Anthropic if
+{none,api,local,hf,free,agent,auto}` selects the language-model backend
+(default `none`; `agent` is the file-handoff loop where an operator --
+human or AI -- answers each turn; `auto` tries local llama-server, then
+HuggingFace (free tier) if `HF_TOKEN` is set, then Anthropic if
 `ANTHROPIC_API_KEY` is set, then the keyless Pollinations POST
-endpoint). See `docs/saying-hi.md` and
-`docs/real-scene-grounding.md`.
+endpoint). `--owl` opts into OWL-ViT open-vocabulary detection as the
+last-resort answer to "where is the X" for never-seen objects (full-res
+color frame on demand, model pre-loaded at startup). See
+`docs/saying-hi.md` and `docs/real-scene-grounding.md`.
 
 ## Running it
 

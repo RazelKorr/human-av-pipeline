@@ -46,6 +46,9 @@ MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "..", "models")
 
 
+_MODEL_CACHE: dict[str, object] = {}
+
+
 def _load_model(model_size: str):
     from faster_whisper import WhisperModel
     if os.path.isdir(model_size):
@@ -53,8 +56,15 @@ def _load_model(model_size: str):
     else:
         local = os.path.join(MODEL_DIR, f"faster-whisper-{model_size}")
         path = local if os.path.isdir(local) else model_size
-    # CPU is fine for clips; int8 keeps it light.
-    return WhisperModel(path, device="cpu", compute_type="int8")
+    # Cache per resolved path: the rolling transcriber calls this every
+    # few seconds of stream time, and reloading ~150 MB of weights per
+    # window was stalling the tick loop (2026-10-01 audit). Models are
+    # read-only, so one instance per path is safe to share.
+    if path not in _MODEL_CACHE:
+        # CPU is fine for clips; int8 keeps it light.
+        _MODEL_CACHE[path] = WhisperModel(path, device="cpu",
+                                          compute_type="int8")
+    return _MODEL_CACHE[path]
 
 
 def load_wav_mono(wav_path: str, target_sr: int = 16000) -> np.ndarray:

@@ -150,9 +150,10 @@ def main():
                          "dark-street=Star-Tours gate/corridor labels")
     ap.add_argument("--owl", action="store_true",
                     help="opt-in on-demand OWL-ViT detection: 'where is the "
-                         "X' / 'find the X' with no memory track scans the "
-                         "latest frame (lazy model load, ~2 s/query CPU, "
-                         "never in the 10 Hz tick loop)")
+                         "X' / 'find the X' with no memory track scans a "
+                         "full-res color frame on demand (model pre-loads "
+                         "at startup, ~19 s on 2 CPU cores; detection "
+                         "never runs in the 10 Hz tick loop)")
     ap.add_argument("--tx-window", type=float, default=10.0,
                     help="transcription window s (smaller = more responsive)")
     ap.add_argument("--tx-step", type=float, default=3.0)

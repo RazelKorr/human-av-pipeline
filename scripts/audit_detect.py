@@ -25,7 +25,6 @@ from scripts.audit_recognition import extract_crops, MONTAGE
 
 
 def main():
-    from PIL import Image
     ok = True
     det = ObjectDetector()
     frame = extract_crops(MONTAGE)[10].convert("RGB").resize((224, 224))
@@ -40,7 +39,7 @@ def main():
               f"in {dt * 1000:.0f} ms")
         out = []
         for d in dets:
-            mx, my = ObjectDetector.box_center_map(d)
+            mx, my = ObjectDetector.box_center_map(d, 224, 224)
             out.append((d[0], mx, my, d[5]))
         return out
 

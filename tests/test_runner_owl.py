@@ -11,7 +11,6 @@ import os
 import sys
 
 import numpy as np
-import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -39,11 +38,6 @@ class StubDetector:
         if any("window" in q for q in queries):
             return [("a window", 100.0, 100.0, 140.0, 140.0, 0.50)]
         return []
-
-    @staticmethod
-    def box_center_map(det):
-        _, x0, y0, x1, y1, _ = det
-        return ((x0 + x1) / 2.0 / 4.0, (y0 + y1) / 2.0 / 4.0)
 
 
 def _wire():

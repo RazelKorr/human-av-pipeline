@@ -116,5 +116,5 @@ def test_owlvit_detects_window_in_crop():
     top = dets[0]
     assert top[0] == "a window", f"top detection was {top[0]}"
     assert top[5] > 0.10
-    mx, my = ObjectDetector.box_center_map(top)
+    mx, my = ObjectDetector.box_center_map(top, 224, 224)
     assert 0 <= mx <= 56 and 0 <= my <= 56
