@@ -104,6 +104,22 @@ frame -> foveal crop (96x96 @ fixation, 2x upscale)
              the 10 Hz tick loop.
 ```
 
+**Live-fire (2026-10-01).** First end-to-end run against real OWL-ViT
+weights on the Star Tours ride film (75 s, two planted questions,
+`--llm none`): "where is the window?" -> "Found the window -- looking
+at it center." (detector cleared 0.10 on the live 224 px frame);
+"where's the gate?" -> "I don't know what a gate looks like yet."
+(the hangar door scores 0.00 in pipeline grayscale -- an honest miss,
+not a confabulation). Two bugs fell out of the test: Whisper rendered
+the name as "Woat House" (added to NAME_PATTERNS) and
+extract_referent's `where(?:'s|...)` could never match because
+_normalize strips apostrophes before the regex runs (now
+`where(?:s|\s+is)`). Latency: ~22 s cold (model load), ~2.4 s warm
+per query on 2 CPU cores. Note the detector sees the reflex loop's
+224x224 grayscale frame -- it is starved relative to the full-res
+color crops the audit used; borderline scores (0.104-0.176) are the
+norm, not the exception, on this input.
+
 ## Audits
 
 1. **Recognition** (`scripts/audit_recognition.py`): 6/12 top-1,

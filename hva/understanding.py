@@ -62,6 +62,11 @@ NAME_PATTERNS = [
     # addresses whenever Whisper picks the "world" spelling.
     r"world\s+house",
     r"word\s+house",    # expected neighbor of the above
+    # 2026-10-01: live --owl test on the Star Tours ride film rendered the
+    # name as "Woat House" ("Wodehaus, where is the gate?" -> "Woat House,
+    # where's the gate?"); the gate turn never fired because no pattern
+    # matched. Observed, not guessed.
+    r"woat\s+house",
 ]
 
 
@@ -398,7 +403,7 @@ def extract_referent(text: str) -> str | None:
     """Pull the X out of 'look at (the) X' / 'find (the) X' /
     'where is (the) X'."""
     m = re.search(r"\b(?:look\s+(?:at|toward(?:s)?)|find|locate|"
-                  r"where(?:'s|\s+is))\s+(?:the\s+|a\s+|an\s+)?"
+                  r"where(?:s|\s+is))\s+(?:the\s+|a\s+|an\s+)?"
                   r"(.+?)(?:\s+please)?\s*$", _normalize(text))
     if not m:
         return None
