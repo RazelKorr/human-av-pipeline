@@ -1216,3 +1216,26 @@ Mykal's favorite episode, watched as if he'd sat the rig down in front of his PC
 
 ### Verdict
 The full Sensorium on a dialogue cartoon: the eyes hop (1,444 saccades, 98.7% of cuts chased within 200 ms vs 73% chance), the tracker starves (51 stillborn pursuits), the ears log 588 onsets of people talking. The fixture lesson with numbers on it: the motion pathway is healthy and bored. Nothing about the Star Tours findings needed retracting.
+
+## FF3 "Backrooms - Found Footage #3" — full Sensorium watch, 1080p (2026-10-04, eep-time commission)
+
+Mykal's favorite of the three Found Footage films, watched as the full eep-time ritual: the complete 1080p file (input/ff3_full_hd.mp4, 1440x1080, 2701s), everything on. Run dir `output/ff3_hd_av/`; review at `output/ff3_hd_av/review.md`; beat map at `output/ff3_hd_av/beat-map.md` (8 beats); sealed predictions at `output/ff3_hd_av/sealed-predictions.md` (1/12 clean, 1 partial, 10 misses — the most prediction-breaking run yet).
+
+### Run configuration
+`streaming/run_stream.py input/ff3_full_hd.mp4 --outdir output/ff3_hd_av --motion-weight 1.0 --pursuit --audio --transcribe-onsets 10`. Fast-combo defaults (luma_ratio, fovea_levels 3, mask_cache), 96x54 third-split motion thumb. Full test suite green before the run (259 passed). First run to cost more than realtime: 0.81x, 0 chunk deadline misses.
+
+### Results
+- 54,019 moments (2701.0 s), 7,867 saccades at a metronomic 2.9/s (flat across all content; lowest 5-min bin at 94% of mean — the attention driver runs on its own clock), 1,127 pursuit segments ALL at exactly 0.40s minimum, chained through walking footage (427.3 s gliding, 15.8%). The motion channel found the egomotion flow field and wouldn't let go — optokinetic gliding in 400ms hops, horizontally biased (53%), ~122 px/s.
+- Audio: 3,362 onsets at 1.24/s (near-uniform across all beats — the hum/handling are transient-rich), 2,735 visual transients, 1,208 bound (35.9%) vs 39.7% Poisson chance — below chance; dt quantized to the 50ms moment grid, roughly uniform. Third straight run where binding measures the medium, not the moment. ~159 zero-dt pairs are the genuine candidates.
+- New audio interpretation pathway (hva/interpret.py: CLAP labels, two-tier transcription, music analysis) run on a 918-window stratified sample (every 4th onset + top-100 loudest): speech 33.6% top-1 (VAD confirms 47/51 transcribed), footsteps 24.2%, thud 8.5%, engine 6.5%, music 6.3%. The film is vocalization-dense — breathing, grunting, shouting, conversing — not the "quiet hum" of its reputation. Two-tier transcription (110 windows, 47 escalated): 1649.7s "We're in Marvel!" resolves to screams; 1118.6s Korean hallucination resolves to laughter ("HO-HO-HO-HO-HO!"); genuine exchanges at 2335.9s, 2364.1s ("nine fucking hours"), 2430.6s. Music flags rare (18/918, 2.0%), clustered (791-846s, 1650s, 2562-2593s).
+- The two loud dark pillars (B6 ~1620-1740s, B8 ~2280-2700s): loudest sustained audio (RMS 4-8x baseline) against the lowest visual energy anywhere. The horror is audio-led. Fixations scatter widest in the final dark (238px vs 143px lit wandering).
+
+### Red-team corrections filed in the review's errata
+1. Beat-map B1 correction (pre-review): first draft called B1 "Entry" and read the 19s frame-energy peak (0.244, film's largest) as the backrooms transition. Frame verification: the film opens in the normal world (park, car radio, flag, house) until the dark threshold at ~210-270s. The protocol caught it before the review did.
+2. R5 rescored PARTIAL -> FAIL on red-team re-read: only the descent ladder clearly matched the predicted event stretches; generosity was grading on vibe.
+3. Scream transcripts qualified: medium's 1649s outputs at logprobs -0.93..-1.04 support vocal character (screaming), not word-level claims. 92% VAD confirmation noted as an upper bound (sample skews loud).
+4. 19s "cut" -> defocused bokeh passage (frames 17-21s show bokeh, not an edit).
+5. Coverage note: interpretation on 918-window stratified sample, not all 3,362 (VM OOMs on 2 concurrent CLAP workers; single worker ~4s/window). Uniform onset rate makes the systematic sample representative; top-100 loudest fully covered.
+
+### Verdict
+The pipeline's FF3 is a film about exertion: 45 minutes of a body moving through a hostile space, heard more than seen. The sealed predictions broke 10/12 because the mental model was "empty hum with rare events" and the reality is "dense human noise over machine drone" — the best possible outcome for the regime. Nothing about the Star Tours or Dr Tran findings needed retracting; the binding coincidence result replicated for the third time (below chance here).
