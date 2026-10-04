@@ -162,6 +162,13 @@ def label_window(audio: np.ndarray, sr: int = SR,
     # padding dilutes, it doesn't invent).
     if len(wav48) < CLAP_SR:
         wav48 = np.pad(wav48, (0, CLAP_SR - len(wav48)))
+    # laion-clap randomly truncates inputs over 10 s (rand_trunc) --
+    # non-deterministic. Center-truncate deterministically first so
+    # the same window always yields the same labels.
+    max_len = 10 * CLAP_SR
+    if len(wav48) > max_len:
+        start = (len(wav48) - max_len) // 2
+        wav48 = wav48[start:start + max_len]
     with torch.no_grad():
         # Default (use_tensor=False) path: accepts numpy, applies the
         # training-time int16 quantization before feature extraction.
@@ -219,13 +226,17 @@ def transcribe_two_tier(audio: np.ndarray, sr: int = SR,
                   "word": w.word,
                   "prob": round(float(w.probability), 3)}
                  for w in (s.words or [])]
+        # avg_logprob should always be a float; None means "unknown" --
+        # keep the segment on base rather than crashing or escalating
+        # blind.
+        lp = s.avg_logprob if s.avg_logprob is not None else 0.0
         seg = {"start": round(s.start + offset_s, 3),
                "end": round(s.end + offset_s, 3),
                "text": s.text.strip(),
-               "avg_logprob": round(float(s.avg_logprob), 3),
+               "avg_logprob": round(float(lp), 3),
                "tier": "base",
                "words": words}
-        if float(s.avg_logprob) < low_conf_threshold and s.text.strip():
+        if float(lp) < low_conf_threshold and s.text.strip():
             if m2 is None:
                 m2 = _load_model(second)
             a0 = max(0, int(s.start * SR))
@@ -293,13 +304,18 @@ def music_features(audio: np.ndarray, sr: int = SR) -> dict | None:
 def interpret_window(audio: np.ndarray, sr: int = SR,
                      t_s: float = 0.0, strength: float = 0.0,
                      label_top_k: int = 5,
-                     transcribe: bool = True) -> dict:
+                     transcribe: bool = True,
+                     window_start_s: float | None = None) -> dict:
     """One onset window through the full "what" pathway.
 
-    Returns {t_s, strength, labels, transcript, music} where
-    transcript is the two-tier result (or None when transcribe=False)
-    and music is music_features output, or None when the window isn't
-    music-flagged or isn't analyzable.
+    Returns {t_s, strength, window_start_s, labels, transcript, music}
+    where transcript is the two-tier result (or None when
+    transcribe=False) and music is music_features output, or None when
+    the window isn't music-flagged or isn't analyzable.
+
+    Transcript segment times are relative to the window start; add
+    window_start_s for absolute media time. (The script that cuts the
+    window passes its start here.)
     """
     audio = _sanitize(audio)
     labels = label_window(audio, sr=sr, top_k=label_top_k)
@@ -310,6 +326,8 @@ def interpret_window(audio: np.ndarray, sr: int = SR,
     return {
         "t_s": round(float(t_s), 3),
         "strength": round(float(strength), 4),
+        "window_start_s": (round(float(window_start_s), 3)
+                           if window_start_s is not None else None),
         "labels": labels,
         "transcript": tx,
         "music": music,

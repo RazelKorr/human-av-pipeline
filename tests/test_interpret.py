@@ -172,6 +172,18 @@ def test_two_tier_threshold_is_sealed_value():
     assert LOW_CONF_THRESHOLD == -0.8
 
 
+def test_two_tier_none_logprob_stays_on_base(monkeypatch):
+    # avg_logprob None ("unknown") must not crash or escalate blind.
+    seg = _FakeSeg(0.0, 1.0, "uncertain", None)
+    base_m, med_m = _patch_loader(monkeypatch, [seg], [])
+    audio = np.zeros(SR * 2, dtype=np.float32)
+    r = transcribe_two_tier(audio, low_conf_threshold=-0.8)
+    assert r["n_escalated"] == 0
+    assert med_m.calls == 0
+    assert r["segments"][0]["tier"] == "base"
+    assert r["segments"][0]["avg_logprob"] == 0.0
+
+
 # --- model-backed tests --------------------------------------------------
 
 @needs_clap
@@ -191,6 +203,15 @@ def test_label_window_schema_and_scores():
 @needs_clap
 def test_label_window_deterministic():
     a = _noise_burst()
+    assert label_window(a) == label_window(a)
+
+
+@needs_clap
+def test_label_window_long_audio_deterministic():
+    # >10 s: laion-clap would randomly truncate (rand_trunc); we
+    # center-truncate deterministically first.
+    rng = np.random.default_rng(1)
+    a = rng.standard_normal(15 * SR).astype(np.float32) * 0.3
     assert label_window(a) == label_window(a)
 
 
