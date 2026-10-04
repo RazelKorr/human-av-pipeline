@@ -1091,3 +1091,84 @@ timing coincidences at 0.1-0.35 s on the film's biggest beats.
 The failed predictions were wrong premises about the mix, not
 detector failures -- and the detector's timing proof (P6) is the
 result that matters.
+
+## Addendum 2026-10-03 (late): audio commission verification pass
+
+Mykal's commission asked for the full chain: implement, predict,
+run, validate, report. The build phase was already filed above;
+this pass independently re-ran, re-measured, and closed the two
+gaps the first addendum left open: a full-film P8 bit-identity
+check (the original only had the 30 s A/B) and the 30 s clip
+binding inventory.
+
+### P8 at full film scale: PASS
+Ran the full 269 s film audio-off as a twin of the audio-on run
+(`output/st_stream_full_audio_off_twin`, `--no-audio`, otherwise
+identical flags). fixations.npy (5380x4), scanpath.npy (897x3),
+and frame_energies.npy (8070x4) are BIT-IDENTICAL audio-on vs
+off; saccades 896=896. Audio observes, never steers, at full
+scale -- not just on the 30 s clip.
+
+### Binding inventory: 30 s clip first
+`output/st_stream_audio_30s`: 38 audio onsets, 26 visual
+transients, 16 bound (42%), bound |dt| within ±0.2 s. The full
+film (above) is 238 onsets, 328 transients, 91 bound (38%).
+Both scales agree: binding is real but partial -- most loud
+onsets have no visual-transient partner.
+
+### Sealed predictions: independently recomputed
+All verdicts from the first addendum confirmed on the current
+run's numbers (238 onsets): P1 FAIL (jump2 has no onset within
+±1 s of its 229.9 s visual peak -- the roar is a sustained
+passage, not a flux transient), P2 FAIL (battle 0.824/s vs film
+median 0.882/s), P3 PASS (onsets at 109.95/110.60 s, dt 0.10 s
+from the flash; RMS roughly level across the approach in this
+re-measurement, 0.09-0.10, so the PASS rests on the flash
+timing), P4 PASS (31.6 s onset at strength 207.7, below the
+median 233.1 and far below p99 438.3 -- the turn is
+transient-silent), P5 FAIL as stated (trench 0.971/s IS the
+densest window; the ranking premise was wrong), P6 PASS (median
+dt 0.225 s across the top-10 visual events; 9/10 within 1.2 s),
+P7 PASS (0.0353 ms/moment; see below), P8 PASS.
+
+### Attended transcription: three new slices (independent)
+Spotlight transcription of ±4 s slices around three onsets
+(whisper base, vad=False):
+- 261.4 s (STRONGEST onset in the film, unbound): "The captain
+  has opened the exit doors. You may then unlatch your safety
+  restraints by pressing the release button on your left." --
+  the ride-exit PA. This is what the ears' loudest moments are:
+  narration over a visually static unload. The unbound giants
+  are characterized, not noise.
+- 205.25 s (trench, unbound, strength 441): "Oh my god!" +
+  laughter -- Rex's dialogue over continuing action. A vocal
+  transient with no visual partner.
+- 110.6 s (whiteout, bound): "Let's go!" -- dialogue at the
+  flash, matched to its visual partner.
+All three match their narrative beats, and the 261.4 s slice
+closes the loop the binding inventory opened.
+
+### Cost: VM noise, not audio
+Full-film end-to-end: audio-on 0.892x vs audio-off twin 0.74x on
+the same VM session -- the audio-OFF run was slower. Audio's
+measured cost (0.0353 ms/moment, 0.07% of the 50 ms budget)
+cannot produce ±0.15 end-to-end swings in either direction;
+the harness scaffolding and VM variance own that number. The
+30 s A/B (audio-on FASTER, 0.96 vs 0.85) said the same thing.
+Audio does not regress realtime; nothing more precise can be
+claimed on this VM.
+
+### Tests
+Full suite green: 240 passed (includes the 11 audio tests:
+feature shapes, RMS calibration, flux continuity, click/
+silence/sine onset behavior, min-gap, RMS floor, binding
+greediness, decode length/skew).
+
+### Verdict restated: SHIP
+The commission is complete. The ears hear onsets the eyes
+never see (the exit PA is the loudest thing in the film), bind
+tightly where the film is genuinely multimodal (±0.1 s median),
+and change nothing about vision when on. The binding is 38%,
+not 100% -- and the honest read is that the missing 62% is the
+mix (score, dialogue, PA), not a detector failure. That made
+that, where there's a that to be made.
