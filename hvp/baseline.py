@@ -28,6 +28,14 @@ SACCADE_RATE_HZ = 3.5
 # Visually-guided saccade latency: time from "decide" to eyes moving
 SACCADE_LATENCY_MS = 200.0
 
+# Smooth pursuit: the eye-glide that tracks a moving target. No
+# saccadic suppression during pursuit -- the eyes stay online while
+# tracking, unlike the ballistic jump.
+PURSUIT_LATENCY_MS = 100.0   # faster than a saccade: pursuit is cheap
+PURSUIT_SEGMENT_MS = 1000.0  # pursuit is planned in 1 s segments,
+                             # re-evaluated at each decision tick
+PURSUIT_GAIN = 1.0           # pursuit velocity / target velocity
+
 # Fovea: ~2 degrees of high acuity; e2 = eccentricity falloff constant
 FOVEA_RADIUS_DEG = 1.0
 E2_DEG = 2.5

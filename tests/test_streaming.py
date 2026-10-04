@@ -20,8 +20,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
-STAR_TOURS = ("/home/hatch/workspace/human-vision-pipeline/input/"
-              "star_tours_1_ride_film.mp4")
+STAR_TOURS = os.path.join(
+    REPO, "input", "star_tours_1_ride_film.mp4")
 
 needs_video = pytest.mark.skipif(
     not os.path.exists(STAR_TOURS),

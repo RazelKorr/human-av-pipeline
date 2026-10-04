@@ -99,6 +99,13 @@ aliasing (wagon-wheel) and flicker fusion in the battery.
   parked. The bottom-up stack already runs ~3x realtime, so it is
   technically feasible — it is simply not the goal right now. The
   research target is the vision/attention model, not a live demo.
+  (2026-10-03 note: the streaming harness (`streaming/`, see
+  `streaming/STREAMING-REPORT.md`) now gives the v2 path an online
+  story — bit-identical to batch, bounded memory, 0.91x realtime
+  end-to-end on the test VM with vision compute proper at ~1.7x
+  realtime — and the external-stream front door is designed. The
+  live-sensor embodiment itself remains parked; the harness is the
+  seam for it.)
 - Foveated sampling of the full-res image (full-res foveal cutout +
   low-res periphery, instead of rendering megapixels just to blur them)
   is parked as a hardware problem. Emulation is possible; held for now.

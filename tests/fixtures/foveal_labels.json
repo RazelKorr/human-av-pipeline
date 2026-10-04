@@ -1,0 +1,122 @@
+[
+ {
+  "label": "bay door",
+  "source": "A.png",
+  "box": [
+   760,
+   200,
+   1160,
+   600
+  ]
+ },
+ {
+  "label": "door panel",
+  "source": "A.png",
+  "box": [
+   400,
+   300,
+   800,
+   700
+  ]
+ },
+ {
+  "label": "windows",
+  "source": "B.png",
+  "box": [
+   1400,
+   240,
+   1800,
+   640
+  ]
+ },
+ {
+  "label": "ship",
+  "source": "B.png",
+  "box": [
+   900,
+   500,
+   1300,
+   900
+  ]
+ },
+ {
+  "label": "corridor",
+  "source": "C.png",
+  "box": [
+   700,
+   300,
+   1100,
+   700
+  ]
+ },
+ {
+  "label": "dark sign",
+  "source": "C.png",
+  "box": [
+   200,
+   400,
+   600,
+   800
+  ]
+ },
+ {
+  "label": "bay sign",
+  "source": "D.png",
+  "box": [
+   700,
+   350,
+   1100,
+   750
+  ]
+ },
+ {
+  "label": "launch bay",
+  "source": "F.png",
+  "box": [
+   500,
+   300,
+   1400,
+   800
+  ]
+ },
+ {
+  "label": "ceiling",
+  "source": "B.png",
+  "box": [
+   600,
+   0,
+   1000,
+   400
+  ]
+ },
+ {
+  "label": "door slats",
+  "source": "A.png",
+  "box": [
+   700,
+   700,
+   1100,
+   1080
+  ]
+ },
+ {
+  "label": "window",
+  "source": "B.png",
+  "box": [
+   100,
+   240,
+   414,
+   504
+  ]
+ },
+ {
+  "label": "doorway",
+  "source": "C.png",
+  "box": [
+   800,
+   200,
+   1200,
+   600
+  ]
+ }
+]

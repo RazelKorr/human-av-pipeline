@@ -16,10 +16,8 @@ from PIL import Image
 
 from hvp.recognize import DARK_STREET_VOCAB, FovealClassifier
 
-MONTAGE = ("/home/hatch/workspace/human-vision-pipeline/output/"
-           "foveal_crops.png")
-LABELS = ("/home/hatch/workspace/human-vision-pipeline/output/"
-          "foveal_labels.json")
+MONTAGE = os.path.join(REPO, "tests", "fixtures", "foveal_crops.png")
+LABELS = os.path.join(REPO, "tests", "fixtures", "foveal_labels.json")
 
 PROMPTS = dict(DARK_STREET_VOCAB)
 

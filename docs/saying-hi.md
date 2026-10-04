@@ -9,7 +9,9 @@ state.
   hail audio -> RollingTranscriber -> TurnDetector -> ResponsePolicy
       -> tts speak -> response audio file
 
-Demo: `python scripts/demo_say_hi.py hail_16k.wav --outdir /tmp/sayhi`
+Demo: the thin wrapper `scripts/demo_say_hi.py` was removed in the
+2026-10-03 audit as stale; the same loop is exercised end to end by
+`scripts/run_conversation.py` and `tests/test_conversation.py`.
 
 Verified 2026-09-30: a TTS-synthesized "Hi Wodehaus, can you hear me?"
 (1.9 s) was transcribed, detected, answered, and spoken back as an
@@ -41,7 +43,9 @@ the map.
   recognized things both steer the bias channel. See
   `docs/recognition.md`.
 
-Demo: `python scripts/demo_understand.py`
+Demo: the thin wrapper `scripts/demo_understand.py` was removed in
+the 2026-10-03 audit as stale; the same machinery is exercised by
+`tests/test_understanding.py` (34 tests, all passing).
 
 Verified 2026-09-30: with a salient blob on the right, gaze sat at
 (174,114). "Wodehaus look left" moved it to (62,110) for the 3 s the

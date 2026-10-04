@@ -115,12 +115,15 @@ future work, not v1. The frequency-switch controller is also not the full
 story: real auditory attention is object-, stream-, time- and
 space-selective, not just frequency-selective.
 
-## What's next
+## What's next (status 2026-10-03)
 
-Run the Star Tours 0-62s audio end to end: cochleagram, salience map,
-attention trace, event list. A/B the quiet-dwell rule. Then think about
-what "stream" means before calling frequency switching the analog of
-saccades.
+The Star Tours 0-62s audio run and the quiet-dwell A/B are done (see
+above). The open problem stands: auditory streaming / object formation —
+the pipeline knows the waveform cold but can't tell the Starspeeder's
+engines from the score. Frequency-band attention is not the full story:
+interleaved-stream segregation (taking-turns streams) needs temporal
+prediction, and real auditory attention is object-, stream-, time- and
+space-selective, not just frequency-selective.
 
 ## Star Tours 0-62s run (2026-09-30)
 

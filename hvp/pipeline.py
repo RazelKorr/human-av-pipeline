@@ -4,21 +4,31 @@ photon stream -> TemporalIntegrator -> SaccadeController -> Retina
     -> PerceptualMoments -> percept stream
 
 Input frames are pushed with millisecond timestamps. Perceptual moments are
-pulled at 10 Hz. Each moment's content is the 100 ms integrated signal from
-100-200 ms ago (integration window + pipeline latency), foveated at the
-fixation holding during that window, or held constant if a saccade was in
-flight (suppression).
+pulled at moment_ms spacing (default 100 ms = 10 Hz, the human baseline).
+Each moment's content is the integrated signal over the 100 ms window ending
+100 ms ago (integration window + pipeline latency), foveated at the fixation
+holding during that window, or held constant when the whole window fell
+inside saccades (suppression: no clean samples to integrate).
+
+Finer temporal resolution: pass moment_ms=50.0 for 20 Hz moments. The
+integration window stays 100 ms (Bloch's-law temporal integration — the
+honest human number); only the sampling gets finer, so consecutive moments
+overlap. This resolves saccade flights (~50 ms) that a 100 ms grid swallows
+whole, and makes the suppressed flag fire for real instead of ~never.
 """
 
 import numpy as np
 
 from . import baseline as B
-from .retina import foveate
+from .retina import foveate, foveate_color, foveate_color_fast, \
+    foveate_color_luma_ratio
 from .saccades import SaccadeController
 
 
 class VisionPipeline:
-    def __init__(self, frame_shape, dva_per_px, script, fovea_radius_deg=None):
+    def __init__(self, frame_shape, dva_per_px, script, fovea_radius_deg=None,
+                 moment_ms=None, chroma_mode="luma_ratio",
+                 fovea_levels=3, mask_cache=True, box_sigma_threshold=None):
         self.frame_shape = tuple(frame_shape)
         self.dva_per_px = dva_per_px
         self.controller = SaccadeController(script, dva_per_px)
@@ -28,9 +38,42 @@ class VisionPipeline:
                                  else float(fovea_radius_deg))
         self.latency = B.PIPELINE_LATENCY_MS
         self.window = B.INTEGRATION_WINDOW_MS
-        self.moment = B.PERCEPTUAL_MOMENT_MS
+        # None -> human baseline (B.PERCEPTUAL_MOMENT_MS = 100 ms, 10 Hz).
+        # Finer (e.g. 50 ms) = overlapping integration windows, resolving
+        # saccade flights. The window itself stays human.
+        self.moment = (B.PERCEPTUAL_MOMENT_MS if moment_ms is None
+                       else float(moment_ms))
+        # chroma_mode: "luma_ratio" (default) = fast streaming combo:
+        # foveate luma and rescale RGB by the foveated-luma ratio, no
+        # YCbCr round-trip. "foveated" = validated v2 math, chroma
+        # desaturates with eccentricity like human vision (explicit
+        # opt-in for bit-agreement with the v2 reference). "passthrough"
+        # = foveate luminance only, chroma unfolded.
+        if chroma_mode not in ("foveated", "passthrough", "luma_ratio"):
+            raise ValueError(f"chroma_mode must be 'foveated', "
+                             f"'passthrough' or 'luma_ratio', "
+                             f"got {chroma_mode!r}")
+        self.chroma_mode = chroma_mode
+        # foveation speedups (defaults = fast streaming combo; the
+        # validated v2 behavior is available explicitly via
+        # chroma_mode="foveated", fovea_levels=5, mask_cache=False):
+        # - fovea_levels: blur-pyramid depth (3 = default; 5 = v2;
+        #   fewer = coarser eccentricity quantization, changes the math).
+        # - mask_cache: memoize eccentricity-band masks per fixation
+        #   (bit-identical to uncached; ~85% hit rate in streaming).
+        # - box_sigma_threshold: above this per-band sigma use the
+        #   stacked box-blur approximation (approximation, not identical).
+        self.fovea_levels = int(fovea_levels)
+        if self.fovea_levels < 1:
+            raise ValueError(f"fovea_levels must be >= 1, "
+                             f"got {fovea_levels!r}")
+        self._mask_cache = {} if mask_cache else None
+        self.box_sigma_threshold = (None if box_sigma_threshold is None
+                                    else float(box_sigma_threshold))
+        # color path when frames are HxWx3; grayscale otherwise
+        self._color = len(self.frame_shape) == 3 and self.frame_shape[2] == 3
         self._times = []   # list of float ms
-        self._frames = []  # list of HxW float32
+        self._frames = []  # list of HxW (or HxWx3) float32
 
     def push(self, frame, t_ms):
         frame = np.asarray(frame, dtype=np.float32).reshape(self.frame_shape)
@@ -58,9 +101,26 @@ class VisionPipeline:
         return (stack.mean(axis=0).astype(np.float32),
                 1.0 - len(idx) / len(in_window))
 
-    def moments(self, t_end_ms, t_start_ms=0.0):
-        """Yield (t_ms, percept_frame, meta) for each 10 Hz moment.
+    def _foveate_kw(self):
+        """Keyword args threading the foveation speedups into foveate()."""
+        return dict(levels=self.fovea_levels,
+                    mask_cache=self._mask_cache,
+                    box_sigma_threshold=self.box_sigma_threshold)
 
+    def _render_color(self, neural, fx, fy):
+        """Foveate one integrated color frame per the chroma_mode."""
+        kw = dict(fovea_radius_deg=self.fovea_radius_deg, **self._foveate_kw())
+        if self.chroma_mode == "passthrough":
+            return foveate_color_fast(neural, (fx, fy), self.dva_per_px, **kw)
+        if self.chroma_mode == "luma_ratio":
+            return foveate_color_luma_ratio(neural, (fx, fy), self.dva_per_px,
+                                            **kw)
+        return foveate_color(neural, (fx, fy), self.dva_per_px, **kw)
+
+    def moments(self, t_end_ms, t_start_ms=0.0):
+        """Yield (t_ms, percept_frame, meta) for each moment.
+
+        Moments are spaced self.moment ms apart (default 100 ms = 10 Hz).
         t_start_ms skips earlier moments (for chunked rendering); the
         caller should still push ~1 s of lead-in frames so the first
         kept moment has a full integration window and a seeded hold.
@@ -75,9 +135,13 @@ class VisionPipeline:
             suppressed = neural is None
             if suppressed:
                 percept = prev  # hold: no clean samples this window
+            elif self._color:
+                percept = self._render_color(neural, fx, fy)
+                prev = percept
             else:
                 percept = foveate(neural, (fx, fy), self.dva_per_px,
-                                  fovea_radius_deg=self.fovea_radius_deg)
+                                  fovea_radius_deg=self.fovea_radius_deg,
+                                  **self._foveate_kw())
                 prev = percept
             yield t, percept, {"suppressed": suppressed,
                               "supp_frac": frac_supp,

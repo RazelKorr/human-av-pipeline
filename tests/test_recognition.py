@@ -104,10 +104,23 @@ def test_text_cache_keyed_by_prompt():
 
 
 def test_owlvit_detects_window_in_crop():
+    # EMPIRICAL INTEGRATION TEST. Fixture regenerated 2026-10-03
+    # (Mykal's call): tests/fixtures/foveal_crops.png is a 4x3 montage
+    # (330px cells, title strip at each cell top, per extract_crops)
+    # of hand-labeled crops from current pipeline-relevant footage
+    # (Star Tours ride film + OWL-ViT probe clips). Labels live in
+    # tests/fixtures/foveal_labels.json. crop[10] is hand-labeled as
+    # containing a window -- the assertion checks exactly that.
+    # NOTE (2026-10-01 live finding): the detector starves on 224px
+    # grayscale reflex frames (0.10-0.18 scores) -- the montage crops
+    # are full-res color, which is why this works.
     pytest.importorskip("transformers")
     from hvp.detect import ObjectDetector
-    from scripts.audit_recognition import extract_crops, MONTAGE
-    crops = extract_crops(MONTAGE)
+    from scripts.audit_recognition import extract_crops
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    montage = os.path.join(repo, "tests", "fixtures", "foveal_crops.png")
+    assert os.path.exists(montage), f"missing fixture {montage}"
+    crops = extract_crops(montage)
     crop = crops[10].convert("RGB").resize((224, 224))  # hand-labeled
     det = ObjectDetector()                              # "windows"
     dets = det.detect(crop, ["a window", "a gate", "a sign"],

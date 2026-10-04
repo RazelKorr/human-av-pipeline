@@ -96,6 +96,21 @@ last-resort answer to "where is the X" for never-seen objects (full-res
 color frame on demand, model pre-loaded at startup). See
 `docs/saying-hi.md` and `docs/real-scene-grounding.md`.
 
+## Streaming harness (2026-10-03)
+
+`streaming/` gives the v2 color-saccades vision path an online story:
+feed a test video as if live, make saccade decisions causally, render
+perceptual moments as they become ready, stay in bounded memory.
+Bit-identical to the post-hoc path on moments, fixations, suppression
+flags, energies, and saccades (30 s / 62 s / full-film validated);
+0.91x realtime on the test VM with the recommended combo, vision
+compute proper ~1.7x. Opt-in modes: chroma passthrough and luma_ratio
+(faster render), fovea-level reduction, mask cache, magno channel
+(motion energy + smooth pursuit). Full numbers, mode inventory, and
+dated build diary: `streaming/STREAMING-REPORT.md`. Vision-only by
+design; audio streams via `hva/stream.py` and the Level-3 pairing
+pattern in `scripts/run_level3_stream.py`.
+
 ## Running it
 
 ```bash

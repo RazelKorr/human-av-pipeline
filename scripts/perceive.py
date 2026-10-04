@@ -6,7 +6,8 @@ never really sees. People are bad at enumerating their own perceptual
 experience -- this enumerates it for them.
 
 A still image is treated as a static scene watched for --seconds. The
-attention driver (the same one as run_video_saccades.py) picks saccade
+attention driver (the same one as the retired run_video_saccades.py)
+picks saccade
 targets at ~3.5 Hz with 200 ms latency; inhibition of return keeps it
 exploring instead of re-fixating. Nothing moves, so the transient channel
 stays silent -- every saccade here is earned by brightness and contrast.
@@ -58,7 +59,8 @@ def main():
     n_frames = int(args.seconds * FPS)
     t_end = n_frames * dt
 
-    # ---- attention driver (same machinery as run_video_saccades.py) ----
+    # ---- attention driver (same machinery as the retired
+    # run_video_saccades.py) ----
     dva = B.FIELD_WIDTH_DEG / VSIZE
     cx = cy = VSIZE / 2.0
     controller = SaccadeController([(0, cx, cy)], dva)

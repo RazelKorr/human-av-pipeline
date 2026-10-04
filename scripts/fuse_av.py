@@ -41,7 +41,8 @@ VIS_LAG_MOMENTS = 2
 
 
 def build_visual_scanpath(video_path, seconds, audio_onsets=None):
-    """First-pass attention driver (from run_video_saccades.py): builds the
+    """First-pass attention driver (from run_video_saccades.py, the
+    grayscale predecessor removed 2026-10-03): builds the
     saccade script for the segment.
 
     audio_onsets: optional list of (t_s, pan, conf) for Level 2

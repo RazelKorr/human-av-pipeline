@@ -4,6 +4,7 @@ Closed-loop driver. The pipeline watches the flicker paradigm and picks
 saccade targets from a salience map:
 
   salience = static center-surround contrast + transient channel
+             + chromatic center-surround (color-native: R/G, B/Y opponency)
              - inhibition of return - current-fixation disk
 
 The transient channel is why the mask works: each mask onset/offset floods
@@ -48,6 +49,13 @@ def _downsample(frame):
     return np.asarray(small, dtype=np.float32) / 255.0
 
 
+def _downsample_color(frame):
+    """Any-size HxWx3 frame -> SMALLxSMALLx3 float32 thumbnail (bilinear)."""
+    im = Image.fromarray((np.clip(frame, 0, 1) * 255).astype(np.uint8))
+    small = im.resize((SMALL, SMALL), Image.BILINEAR)
+    return np.asarray(small, dtype=np.float32) / 255.0
+
+
 def _norm(x):
     m = x.max()
     return x / m if m > 1e-9 else x
@@ -58,25 +66,72 @@ def _blob(shape, x0, y0, sigma):
     return np.exp(-((xx - x0) ** 2 + (yy - y0) ** 2) / (2 * sigma ** 2))
 
 
+CHROMA_WEIGHT = 1.0  # default weight of the chroma channel vs luminance
+
+# Salience-formula constants (named 2026-10-03 audit; values unchanged).
+TRANSIENT_WEIGHT = 1.5    # transient channel weight vs static center-surround
+INHIB_WINDOW_MS = 1500.0  # inhibition-of-return memory window
+INHIB_TAU_MS = 800.0      # inhibition-of-return decay time constant
+INHIB_SIGMA = 5.0         # inhibition-of-return blob radius (map px)
+FIX_DISK_SIGMA = 3.5      # current-fixation suppression disk (map px)
+CS_SIGMA = 6.0            # center-surround blur radius (map px)
+
+
+def chroma_salience(small_rgb):
+    """Chromatic center-surround salience on color-opponent axes.
+
+    small_rgb: SMALLxSMALLx3 float32 in 0..1. Computes center-surround
+    contrast on the red/green and blue/yellow opponent axes (the
+    early-visual-system version of "colors can drive attention just like
+    brightness"), each normalized, summed. Returns a SMALLxSMALL map.
+    Achromatic input -> ~0 everywhere.
+    """
+    r = small_rgb[..., 0]
+    g = small_rgb[..., 1]
+    b = small_rgb[..., 2]
+    rg = r - g
+    by = b - (r + g) / 2.0
+    rg_cs = np.abs(rg - gaussian_filter(rg, CS_SIGMA))
+    by_cs = np.abs(by - gaussian_filter(by, CS_SIGMA))
+    return _norm(rg_cs) + _norm(by_cs)
+
+
 def salience_map(small_now, trans_map, t_now, controller, inhib,
-                 sx=SCALE, sy=SCALE):
+                 sx=SCALE, sy=SCALE, small_rgb=None, chroma_weight=None,
+                 motion_map=None, motion_weight=None):
     """salience = static center-surround + persistent transient
+                 + chromatic center-surround (if small_rgb given)
+                 + motion energy (if motion_map given, magno channel)
                  - inhibition of return - current-fixation disk.
 
     sx/sy: frame-pixels per grid cell along x/y. Default to the square
     SCALE for the synthetic tests; video callers pass per-axis scales
-    so non-square frames map correctly."""
-    static = _norm(np.abs(small_now - gaussian_filter(small_now, 6)))
+    so non-square frames map correctly.
+    small_rgb: optional SMALLxSMALLx3 color thumbnail; when None (e.g.
+    grayscale trials) the chroma channel is exactly 0 and behavior is
+    identical to the luminance-only driver.
+    motion_map: optional SMALLxSMALL motion-energy map from the magno
+    channel; when None or motion_weight is falsy the motion channel is
+    exactly 0 and behavior is identical to the motion-off driver."""
+    static = _norm(np.abs(small_now - gaussian_filter(small_now, CS_SIGMA)))
     transient = _norm(trans_map)
-    sal = static + 1.5 * transient
+    sal = static + TRANSIENT_WEIGHT * transient
+
+    if small_rgb is not None:
+        w = CHROMA_WEIGHT if chroma_weight is None else chroma_weight
+        sal = sal + w * chroma_salience(small_rgb)
+
+    if motion_map is not None and motion_weight:
+        sal = sal + motion_weight * _norm(motion_map)
 
     for (ix, iy, it) in inhib:
         age = t_now - it
-        if age < 1500:
-            sal -= np.exp(-age / 800.0) * _blob((SMALL, SMALL), ix, iy, 5.0)
+        if age < INHIB_WINDOW_MS:
+            sal -= (np.exp(-age / INHIB_TAU_MS)
+                    * _blob((SMALL, SMALL), ix, iy, INHIB_SIGMA))
 
     fx, fy, _ = controller.state_at(t_now)
-    sal -= _blob((SMALL, SMALL), fx / sx, fy / sy, 3.5)
+    sal -= _blob((SMALL, SMALL), fx / sx, fy / sy, FIX_DISK_SIGMA)
     return sal
 
 
@@ -156,7 +211,8 @@ def run_trial(scene_a, scene_b, change_xy, use_mask=True, max_cycles=25):
             t_on_e, dur_e, _f, _to = controller.events[-1]
             t_land = t_on_e + dur_e
             scanpath.append((t_on_e, tx, ty))
-            inhib = [(x, y, it) for (x, y, it) in inhib if t - it < 1500.0]
+            inhib = [(x, y, it) for (x, y, it) in inhib
+                     if t - it < INHIB_WINDOW_MS]
             inhib.append((ix, iy, t))
             next_decision = t + 1000.0 / B.SACCADE_RATE_HZ
 
