@@ -997,3 +997,97 @@ tests); no regressions.
 lines from the build diary were removed (a "[filled in after the run
 completes]" header in the magno addendum whose results were already
 present); no content was dropped.]*
+
+## Addendum 2026-10-03: the audio pathway (Sensorium gets ears)
+
+Mykal: "how do we stitch in the audio instead of just having it be a
+text pass with more steps?" Design principle: hearing isn't reading.
+The transcript is the *fovea* of hearing -- high-effort, attended,
+last resort. The pathway is coarse-first, mirroring the magno
+channel: per-50ms-moment cochlear features (RMS, spectral flux,
+spectral centroid), onset events on the master timeline,
+cross-modal binding, and transcription as an attended spotlight.
+
+### What was built
+- `hva/online.py` (new): `moment_features()` -- per-50ms-moment
+  (rms, flux, centroid) from 16 kHz mono, with flux continuity
+  across chunk boundaries; `pick_onsets()` -- peak-picking with a
+  LOCAL adaptive threshold (median+k*MAD over ±2 s) plus absolute
+  floor. Three floats per moment: the whole of v1 hearing that
+  isn't words.
+- `streaming/feeder.py`: `decode_audio_track()` -- sidecar
+  pre-decode, sliced by sample count; moment alignment exact by
+  construction; zero disturbance to the validated video pipes.
+- `streaming/bind_av.py` (new): `visual_transients()` (frame-energy
+  diffs on the moment grid) + `bind()` (greedy nearest-in-±250 ms
+  audio<->visual coincidence). The "that made that" link.
+- `streaming/run_stream.py`: `--audio/--no-audio` (default on,
+  passive -- observes, never steers), `--transcribe-onsets K`
+  (attended transcription of ±4 s slices around top-K onsets,
+  vad=False -- the VAD demonstrably eats real speech on short
+  slices). Writes `audio_features.npy`, `audio_events.json`,
+  `av_binding.json`, `onset_transcripts.json`; all flags in
+  `run_report.json`.
+- `tests/test_audio.py` (new): 11 tests -- feature shapes, RMS
+  calibration, flux continuity, click/silence/sine onset behavior,
+  min-gap, RMS floor, binding greediness, decode length/skew.
+
+### Design corrections found by measurement (honest)
+1. Loudness-relative flux was wrong for this job: it ranked the
+   hyperspace roars 170th/202nd (silence-to-sound explosions
+   dominate; roars on loud beds get normalized away). Switched to
+   ABSOLUTE flux.
+2. A global MAD threshold then suppressed real transients (film
+   beds keep absolute flux median ~107). Switched to a LOCAL
+   adaptive threshold -- textbook onset detection.
+3. faster-whisper's VAD deletes real speech on 8 s slices; attended
+   transcription runs vad=False.
+
+### Sealed predictions vs outcomes (streaming/docs/audio-predictions-sealed-2026-10-03.md)
+- P1 (roars are the two strongest onsets): FAIL as stated. Jump1
+  has a sharp onset at 64.10 s (dt=0.10 s from the visual peak --
+  the alignment proof works), but it ranks 97/238; jump2 has no
+  isolated transient at its visual peak (233.2 s max is 3.25 s
+  late, inside a sustained passage). The premise imagined isolated
+  roars; the mix doesn't work that way.
+- P2 (battle densest): FAIL. Battle 0.824/s vs film median
+  0.882/s -- the battle is a sustained wall, not discrete bangs
+  at 50 ms scale.
+- P3 (whiteout crescendo): PASS. RMS ramps 0.078->0.176 across
+  96-110 s; onset at 110.60 s, dt=0.10 s.
+- P4 (turn transient-silent): PASS. One weak onset at 31.6 s,
+  none above p99.
+- P5 (trench second-densest): FAIL as stated -- trench IS the
+  densest (0.944/s); the ranking premise was wrong, the substance
+  (trench is onset-rich) holds.
+- P6 (AV coincidence < 1.0 s median): PASS. Median dt 0.23 s
+  across the top-10 visual events (9/10 within 1.2 s).
+- P7 (cost): PASS. 0.035 ms/moment (0.07% of the 50 ms budget).
+  End-to-end 0.89x vs 0.91x baseline -- the 0.02 delta is VM noise
+  (audio's measured cost cannot explain it; 30 s A/B showed
+  audio-on FASTER at 0.96 vs 0.85).
+- P8 (no video behavior change): PASS. 30 s audio-on vs off:
+  fixations.npy and scanpath.npy bit-identical, saccades 99=99.
+
+### Binding inventory (full film)
+238 audio onsets, 328 visual transients, 91 bound (38%). Bound
+pairs land within ±0.2 s typically (e.g. 64.10 s audio <-> 64.05 s
+visual). Strongest unbound onsets cluster at the film end
+(261-268 s: credits/outro the eyes see nothing of) -- the ears
+hear the credits; the eyes don't. Characterization, not failure.
+
+### Attended transcription (validated)
+- Turn slice 31-41 s: "I thought you were going the wrong way,
+  it's not me!" / "Go straight!" -- Rex, matches the beat.
+- Whiteout 106-114 s: "Let's go!"
+- Trench 202-210 s: "Oh my god!"
+All three match their narrative beats. Note: the full-file
+transcript's 19 segments are sparse next to slice results -- the
+spotlight sees more than the floodlight did.
+
+### Verdict: SHIP
+The ears are live: 0.035 ms/moment, zero video-path impact,
+timing coincidences at 0.1-0.35 s on the film's biggest beats.
+The failed predictions were wrong premises about the mix, not
+detector failures -- and the detector's timing proof (P6) is the
+result that matters.

@@ -180,6 +180,37 @@ def decode_split(path, seconds, fps, w1, h1, w2, h2, w3=None, h3=None,
             proc.wait()
 
 
+def decode_audio_track(path, seconds, sr=16000, t0=0.0):
+    """Decode the audio track once, whole, to mono float32 @sr.
+
+    Pre-decoded per run (a few seconds for a feature film; ~8.6 MB
+    for 269 s @16 kHz) and sliced downstream by sample count, so
+    moment alignment is exact by construction -- no pipe interleave,
+    no deadlock risk, zero disturbance to the validated video pipes.
+    Raises RuntimeError if the source has no audio stream.
+    """
+    import subprocess
+    n_expected = int(seconds * sr)
+    cmd = ["ffmpeg", "-v", "error", "-ss", str(t0), "-i", path,
+           "-t", str(seconds), "-vn", "-ar", str(sr), "-ac", "1",
+           "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE)
+    raw = proc.stdout
+    if proc.returncode != 0 or len(raw) < sr:  # <1 s of audio: no track
+        raise RuntimeError(
+            f"no usable audio track in {path} "
+            f"(rc={proc.returncode}, {len(raw)} bytes)")
+    x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if abs(len(x) - n_expected) > sr:  # >1 s skew vs video: bug
+        raise RuntimeError(
+            f"audio/video length skew: {len(x)/sr:.2f}s audio vs "
+            f"{seconds:.2f}s requested")
+    if len(x) < n_expected:
+        x = np.pad(x, (0, n_expected - len(x)))
+    return x[:n_expected].astype(np.float32), int(sr)
+
+
 class ChunkedFeeder:
     def __init__(self, video, seconds, fps, attn_wh=(224, 224),
                  work_wh=(640, 360), chunk_s=2.0, realtime=False,

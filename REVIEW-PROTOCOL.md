@@ -39,7 +39,18 @@ The beat map is built autonomously — he does not rewatch everything sent. He i
 What the pipeline can actually supply for each beat source today:
 
 - **Transcript — automated, works on arbitrary inputs.** `scripts/transcribe.py` (thin wrapper over `python3 -m hva.transcribe`) accepts any audio or video file (`--wav in.mp4 --out transcript.json`): PyAV decodes it and resamples to 16k mono in code. Requires the pipeline venv (`workspace/.venv-pipeline`, faster-whisper installed); model weights live in `models/faster-whisper-base` (+ `models/faster-whisper-medium`). Also supports `--separate-vocals`. One command, no manual step.
-- **Audio track — manual step today.** The streaming vision runner is vision-only: `video_percept.mp4` carries no audio track and no audio artifacts are written alongside vision runs. To read score changes / silence / dialogue density: extract the audio (`ffmpeg -i video -ac 1 -ar 16000 audio.wav`) and run the audio pipeline separately (`hva/stream.py`, `run_level3_stream.py`), or compute per-frame RMS with `scripts/build_frame_index.py --audio-wav audio.wav` (frame-indexed bundles carry `audio_rms` per frame). An audio sidecar in the streaming runner is unbuilt — a call, not a bug.
+- **Audio track — wired into the streaming runner (2026-10-03).**
+  `run_stream.py` extracts the audio track by default (`--audio`,
+  `--no-audio` to disable) and writes `audio_features.npy`
+  (per-50 ms-moment RMS, spectral flux, spectral centroid),
+  `audio_events.json` (spectral-flux onset events on the master
+  timeline), and `av_binding.json` (audio<->visual transient
+  coincidence pairs, ±250 ms). Attended transcription:
+  `--transcribe-onsets K` transcribes ±4 s slices around the top-K
+  onsets (vad=False; the VAD eats real speech on short slices).
+  Score changes, silence, and dialogue density are now first-class
+  beat sources, not manual steps. See STREAMING-REPORT.md (audio
+  addendum) for the sealed-prediction validation.
 - **Diegetic signage — human-read step today.** There is no OCR capability anywhere in the codebase. Reading in-world labels ("MAINTENANCE BAY NO ADMITTANCE", "LAUNCH") is done by the reviewer from the percept video or frame-indexed bundles (`scripts/build_frame_index.py`), with timestamps, and cited as visual evidence per §3. If sign-reading ever becomes automatable, it gets a beat source of its own here.
 
 ---

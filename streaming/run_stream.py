@@ -40,7 +40,10 @@ for p in (ROOT, SCRIPTS, HERE):
 
 import run_video
 from hvp import baseline as B
-from feeder import ChunkedFeeder
+from hva.online import (moment_features, pick_onsets, SR as AUDIO_SR,
+                        MOMENT_MS as AUDIO_MOMENT_MS, SPM as AUDIO_SPM)
+from feeder import ChunkedFeeder, decode_audio_track
+from bind_av import visual_transients, bind as bind_av
 from online_driver import OnlineAttentionDriver, DEFAULT_MOTION_THUMB_WH
 from online_render import OnlineVisionPipeline
 
@@ -132,6 +135,17 @@ def main():
                          "output bit-identical to dual-decode; default); "
                          "'pil' = in-process PIL bilinear (faster, but "
                          "224px frames differ slightly -- see report)")
+    ap.add_argument("--audio", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="extract the audio track and compute per-moment "
+                         "cochlear features + onset events (passive: it "
+                         "observes, never steers; default on; --no-audio "
+                         "for a video-only run)")
+    ap.add_argument("--transcribe-onsets", type=int, default=0, metavar="K",
+                    help="attended transcription: transcribe ±4 s wav "
+                         "slices around the top-K audio onsets by strength "
+                         "(0 = off; the transcript is a spotlight, not a "
+                         "floodlight)")
     args = ap.parse_args()
     _validate_args(args)
     moment_ms = args.moment_ms
@@ -189,6 +203,25 @@ def main():
                                   mask_cache=args.mask_cache,
                                   box_sigma_threshold=args.box_sigma_threshold)
 
+    # --- Audio (Phase 1: cochlea + onsets). Pre-decoded once: 269 s
+    # @16 kHz mono is ~8.6 MB and decodes in ~2 s; slicing downstream
+    # by sample count makes moment alignment exact by construction.
+    # Passive by design: features observe the master grid, never steer
+    # the driver or render, so the video path is bit-identical on/off.
+    audio_on = bool(args.audio)
+    audio_track, audio_prev_mag, audio_feat_log, audio_proc = \
+        None, None, [], []
+    if audio_on:
+        try:
+            a0 = time.time()
+            audio_track, asr = decode_audio_track(args.video, total,
+                                                 sr=AUDIO_SR)
+            print(f"audio: decoded {len(audio_track)/asr:.1f}s @ {asr} Hz "
+                  f"in {time.time()-a0:.1f}s", flush=True)
+        except RuntimeError as e:
+            print(f"WARNING: {e} -- continuing audio-off", flush=True)
+            audio_on = False
+
     out_mp4 = os.path.join(args.outdir, "video_percept.mp4")
     # NOTE: ultrafast preset -- this mp4 is a visualization artifact, not
     # a validation input (all agreement metrics come from the .npy files).
@@ -204,6 +237,7 @@ def main():
     t0_wall = time.time()
     n_frames = n_moments = 0
     fix_log = []
+    frame_t_log = []      # per-frame t_ms, for audio-visual binding
     frame_proc = []       # per-frame processing seconds (driver+render+write)
     chunk_proc = []       # per-chunk processing seconds
     deadline_misses = 0
@@ -212,6 +246,22 @@ def main():
     for chunk in feeder:
         c0 = time.time()
         media_dur = chunk.t1_s - chunk.t0_s
+        # --- audio: per-chunk cochlear features on the master grid
+        if audio_on:
+            a0 = time.perf_counter()
+            s0 = int(round(chunk.t0_s * AUDIO_SR))
+            s1 = int(round(chunk.t1_s * AUDIO_SR))
+            seg = audio_track[s0:s1]
+            n_mom = int(round((chunk.t1_s - chunk.t0_s) /
+                              (AUDIO_MOMENT_MS / 1000.0)))
+            need = n_mom * AUDIO_SPM
+            if len(seg) < need:
+                seg = np.pad(seg, (0, need - len(seg)))
+            blocks = seg[:need].reshape(n_mom, AUDIO_SPM)
+            rms, flux, cent, audio_prev_mag = moment_features(
+                blocks, prev_mag=audio_prev_mag)
+            audio_feat_log.append(np.stack([rms, flux, cent], axis=1))
+            audio_proc.append(time.perf_counter() - a0)
         for (t_ms, f_attn, f_work, f_thumb) in chunk.frames:
             f0 = time.perf_counter()
             # 1. attention driver decides eye movements online (224px coords)
@@ -235,6 +285,7 @@ def main():
                                 bool(m["suppressed"])))
                 n_moments += 1
             frame_proc.append(time.perf_counter() - f0)
+            frame_t_log.append(t_ms)
             n_frames += 1
             t_last = t_ms
         # Stream time ends at the last pushed frame; flush any moments
@@ -286,6 +337,77 @@ def main():
         np.save(os.path.join(args.outdir, "pursuit_log.npy"), pl)
         print(f"wrote pursuit_log.npy ({len(pl)} segments)", flush=True)
 
+    # --- Audio phases 1-3 (passive: never steers the video path)
+    audio_events, binding, onset_transcripts = [], None, []
+    audio_ms_per_moment = None
+    if audio_on and audio_feat_log:
+        afe = np.concatenate(audio_feat_log, axis=0).astype(np.float32)
+        if len(afe) != n_moments:
+            print(f"NOTE: audio moments {len(afe)} vs video moments "
+                  f"{n_moments} -- trimming/padding to the video grid",
+                  flush=True)
+            if len(afe) > n_moments:
+                afe = afe[:n_moments]
+            else:
+                pad = np.zeros((n_moments - len(afe), 3), dtype=np.float32)
+                afe = np.concatenate([afe, pad], axis=0)
+        np.save(os.path.join(args.outdir, "audio_features.npy"), afe)
+        print(f"wrote audio_features.npy ({len(afe)} moments x "
+              f"[rms, flux, centroid])", flush=True)
+        audio_ms_per_moment = (float(np.sum(audio_proc)) / max(n_moments, 1)
+                               * 1000.0)
+        # Phase 1: onset events on the master timeline
+        for t_s, strength in pick_onsets(afe[:, 1], afe[:, 0]):
+            mi = min(int(round(t_s / 0.05)), len(afe) - 1)
+            audio_events.append({"t_s": round(t_s, 3),
+                                 "strength": round(strength, 4),
+                                 "rms": round(float(afe[mi, 0]), 4)})
+        with open(os.path.join(args.outdir, "audio_events.json"), "w") as f:
+            json.dump(audio_events, f, indent=2)
+        print(f"wrote audio_events.json ({len(audio_events)} onsets)",
+              flush=True)
+        # Phase 2: cross-modal binding ("that made that")
+        # driver.energies rows are (t, static_e, chroma_e, trans_e);
+        # the transient signal is the total energy change.
+        e_tot = [r[1] + r[2] + r[3] for r in driver.energies]
+        vtrans = visual_transients(e_tot, frame_t_log)
+        binding = bind_av([(o["t_s"], o["strength"]) for o in audio_events],
+                          vtrans)
+        with open(os.path.join(args.outdir, "av_binding.json"), "w") as f:
+            json.dump(binding, f, indent=2)
+        print(f"wrote av_binding.json ({binding['n_bound']}/"
+              f"{binding['n_audio_onsets']} onsets bound, "
+              f"{binding['n_visual_transients']} visual transients)",
+              flush=True)
+        # Phase 3: attended transcription -- spotlight, not floodlight
+        if args.transcribe_onsets > 0 and audio_events:
+            from hva.transcribe import transcribe as transcribe_wav
+            top = sorted(audio_events, key=lambda o: -o["strength"]
+                         )[:args.transcribe_onsets]
+            for o in top:
+                w0 = max(0.0, o["t_s"] - 4.0)
+                wav = os.path.join(
+                    args.outdir, f"onset_{o['t_s']:.1f}s.wav")
+                subprocess.run(
+                    ["ffmpeg", "-v", "error", "-y", "-ss", str(w0),
+                     "-i", args.video, "-t", "8", "-vn",
+                     "-ar", "16000", "-ac", "1", wav], check=True)
+                segs = transcribe_wav(wav, model_size="base", vad=False)
+                onset_transcripts.append({
+                    "t_s": o["t_s"], "strength": o["strength"],
+                    "window_s": [round(w0, 1), round(w0 + 8.0, 1)],
+                    "segments": [{"start": round(s["start"], 2),
+                                  "end": round(s["end"], 2),
+                                  "text": s["text"].strip(),
+                                  "avg_logprob": round(
+                                      float(s["avg_logprob"]), 3)}
+                                 for s in segs]})
+            with open(os.path.join(args.outdir, "onset_transcripts.json"),
+                      "w") as f:
+                json.dump(onset_transcripts, f, indent=2)
+            print(f"wrote onset_transcripts.json "
+                  f"({len(onset_transcripts)} windows)", flush=True)
+
     fp = np.array(frame_proc)
     report = {
         "video": os.path.basename(args.video),
@@ -305,6 +427,12 @@ def main():
         "fovea_levels": args.fovea_levels,
         "mask_cache": bool(args.mask_cache),
         "box_sigma_threshold": args.box_sigma_threshold,
+        "audio": bool(audio_on),
+        "n_audio_onsets": len(audio_events),
+        "audio_ms_per_moment": (round(audio_ms_per_moment, 4)
+                                if audio_ms_per_moment is not None else None),
+        "n_av_bound": binding["n_bound"] if binding else 0,
+        "transcribe_onsets": int(args.transcribe_onsets),
         "dual_decode": bool(args.dual_decode),
         "single_mode": args.single_mode,
         "saccades": True,
