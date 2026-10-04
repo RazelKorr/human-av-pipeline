@@ -1172,3 +1172,26 @@ and change nothing about vision when on. The binding is 38%,
 not 100% -- and the honest read is that the missing 62% is the
 mix (score, dialogue, PA), not a detector failure. That made
 that, where there's a that to be made.
+
+## Addendum 2026-10-03 (night): audio-visual review watch
+
+First full review watch with the audio pathway live on the same timeline (Mykal: "ride it again with your ears on"). Run dir `output/st_stream_av_full/`; review at `output/st_stream_av_full/review.md`; beat map at `output/st_stream_av_full/beat-map.md` (15 beats, protocol-following).
+
+### Run configuration
+`streaming/run_stream.py input/star_tours_1_ride_film.mp4 --outdir output/st_stream_av_full --motion-weight 1.0 --pursuit --audio --transcribe-onsets 10`. Fast-combo defaults (luma_ratio, fovea_levels 3, mask_cache), 96x54 third-split motion thumb. Full test suite green before the run (240 passed).
+
+### Results
+- 5,380 moments, 735 saccades, 161 pursuit segments, 60.2 s gliding (22.4% of the ride). 735+161 = 896 = the motion-off saccade count: pursuits replace catch-up saccades one-for-one. Realtime 0.86, 0/135 deadline misses.
+- Audio: 238 onsets, 328 visual transients, 91 bound (38.2%) -- bit-for-bit identical to the audio-commission run (deterministic). Audio cost 0.039 ms/moment.
+- Audio-off twin (`output/st_stream_av_full_audio_off_twin/`, same build, motion on): fixations, scanpath, frame_energies, motion_energies, pursuit_log all bit-identical (0.00 max abs diff). Audio observes, never steers -- now validated with the motion channel on.
+- Attended transcription (top-10 onsets, whisper base, vad=False): exit PA cluster verbatim at logprob -0.36..-0.43 ("The captain has opened the exit doors... unlatch your safety restraints... personal belongings. Thank you."); "Oh my god!" at 205.25 s (bound, dt -250 ms); "I meant to do that. A little shortcut." at 55.75 s (unbound, corroborated by the film transcript); "What are you guys doing?" at 175.8 s (logprob -1.21); a loud startled vocalization at 200.35 s bound to the trench-dive transient (whisper reads profanity, logprob -1.05 -- wording uncertain); "We love you" at 154.35 s is confabulation on score texture (logprob -1.51), not dialogue.
+- Ears-first findings: the film's #1/#2/#4 loudest onsets (265.25, 261.4, 268.2 s, strengths 635.5/577.9/433.1) are the exit PA and ALL unbound -- the loudest thing in the film has no visual partner; first green announced at dt=0.0 (onset 138.75 bound to visual 138.75); whiteout flash has a voice ("Let's go!" at 110.6 s, bound, dt 200 ms); trench is the most multimodal passage (event 51: 15/17 onsets bound; event 49: 10/10); the turn's 11 onsets are all unbound (comedy plays in the ears, flying in the eyes).
+
+### Red-team corrections filed in the review's errata
+1. Whiteout gaze: the "centered" correction overcorrected. Peak fixations are (0.47-0.56, 0.19) rt_full, (0.62-0.72, 0.49-0.60) magno, (0.72-0.83, 0.69-0.79) this run -- at the peak of a global flood the target is underdetermined, neither aversion nor centering is a model property. The approach is stably pursued; the ears bind through the flash regardless.
+2. Hyperspace refusal: jump 1 admitted one 400 ms pursuit (63.20-63.60 s) at the tunnel's onset plus a bound onset (64.10 -> 64.05, the collapse). Jump 2 remains a clean refusal. Gate record 1.5-for-2; the admitted glide was scheduled on visual grounds (audio never steers).
+3. Whisper content: logprob-gated -- "We love you" (-1.51) is confabulation; the 200.35 s wording (-1.05) is uncertain; transcription claims carry logprobs or don't ship.
+4. Saccade/pursuit split vs the magno run (735/161 vs 742/154) traces to the motion thumb's resampling path (third-split ffmpeg vs older in-process downsample; motion energies differ mean 0.001/max 0.01), not to audio.
+
+### Verdict
+The ears changed the review: the film now has two endings (the eyes' window at 253.7-258.0 s, the ears' PA at 261-268 s), and the review's loudest moments are audio-first. Nothing about the eyes needed retracting beyond the two corrections above. 38% binding, tight where the film is multimodal.
