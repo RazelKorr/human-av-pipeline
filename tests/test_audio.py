@@ -142,3 +142,19 @@ def test_decode_audio_track_missing_audio_raises(tmp_path):
 def test_moment_grid_constants():
     assert SPM == 800 and MOMENT_MS == 50.0 and SR == 16000
     assert RMS_FLOOR > 0
+
+
+def test_load_audio_no_plane_padding_inflation(tmp_path):
+    # Regression (2026-10-03): hva.transcribe._load_with_av read the whole
+    # padded PyAV plane buffer instead of [:rf.samples], inflating decoded
+    # audio by ~22% (measured 1.2194x) and stretching every transcript
+    # timestamp. hva/stream.py already sliced; this path did not.
+    from hva.transcribe import load_audio
+    vid = str(tmp_path / "tone2.mp4")
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=3",
+         "-f", "lavfi", "-i", "color=black:s=64x64:d=3:r=30",
+         "-shortest", vid], check=True)
+    x = load_audio(vid, target_sr=16000)
+    assert abs(len(x) / 16000 - 3.0) < 0.1, f"inflated: {len(x)/16000:.2f}s"

@@ -116,10 +116,16 @@ def _load_with_av(path: str, target_sr: int = 16000) -> np.ndarray:
     try:
         for frame in container.decode(stream):
             for rf in resampler.resample(frame) or []:
+                # NOTE (2026-10-03): rf.planes[0] is PADDED -- only the
+                # first rf.samples are valid. Reading the whole buffer
+                # inflates the audio by ~22% (measured 1.2194x) and stretches
+                # every downstream timestamp. hva/stream.py already slices;
+                # this path did not.
                 chunks.append(
-                    np.frombuffer(rf.planes[0], dtype=np.int16))
+                    np.frombuffer(rf.planes[0], dtype=np.int16)[:rf.samples])
         for rf in resampler.resample(None) or []:
-            chunks.append(np.frombuffer(rf.planes[0], dtype=np.int16))
+            chunks.append(
+                np.frombuffer(rf.planes[0], dtype=np.int16)[:rf.samples])
     finally:
         container.close()
     if not chunks:
