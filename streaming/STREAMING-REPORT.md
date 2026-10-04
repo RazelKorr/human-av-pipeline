@@ -1195,3 +1195,24 @@ First full review watch with the audio pathway live on the same timeline (Mykal:
 
 ### Verdict
 The ears changed the review: the film now has two endings (the eyes' window at 253.7-258.0 s, the ears' PA at 261-268 s), and the review's loudest moments are audio-first. Nothing about the eyes needed retracting beyond the two corrections above. 38% binding, tight where the film is multimodal.
+
+## Dr Tran ep4 "Mr. Tran and the Toy Cack" — full Sensorium watch (2026-10-03, late)
+
+Mykal's favorite episode, watched as if he'd sat the rig down in front of his PC. Run dir `output/drtran_ep4_av/`; review at `output/drtran_ep4_av/review.md`; beat map at `output/drtran_ep4_av/beat-map.md` (11 beats: the bits/gags); sealed predictions at `output/drtran_ep4_av/sealed-predictions.md` (4/6 held).
+
+### Run configuration
+`streaming/run_stream.py input/drtran_ep4_toy_cack.mp4 --outdir output/drtran_ep4_av --motion-weight 1.0 --pursuit --audio --transcribe-onsets 10`. Fast-combo defaults (luma_ratio, fovea_levels 3, mask_cache), 96x54 third-split motion thumb. Full test suite green before the run (241 passed, incl. the new plane-padding regression test).
+
+### Results
+- 8,721 moments (436.1 s), 1,444 saccades, 51 pursuit segments, 19.9 s gliding (4.6% of the episode). Every pursuit at minimum duration (0.29-0.39 s): the channel tries and never sustains. Realtime 1.26 (faster than realtime), 0 chunk deadline misses.
+- Audio: 588 onsets, 601 visual transients, 298 bound (50.7%). Ears-first: the episode's #1 onset (59.1 s, strength 523.4, Grandma's "Today is a day for paper trails...") is UNBOUND -- mid-shot dialogue, no cut.
+- Attended transcription (top-10 onsets, whisper base, vad=False): all genuine dialogue, per-segment logprobs -0.25..-1.01, zero confabulation. License confession at 329.8 s (onset #2, 484.2); Greg Keneer at 187.6 s; carrot tree at 79.6 s ("caribtry" -- whisper's one charming miss).
+- The gap (377-409 s): 32 s no speech, held bloody tableau, but audio continues (RMS 0.0327 vs 0.0352 episode) -- score/stingers under a silent-looking shot. The commercial (409-415 s): 2 visual transients, 14 onsets -- ears work hardest where eyes rest.
+
+### Red-team corrections filed in the review's errata
+1. Binding interpretation: the 50.7% coincidence rate EQUALS the Poisson chance rate for the transient density (0.507 vs 0.50); dt distribution flat across +/-250 ms, not clustered at zero. Most "bound" pairs are density-driven coincidence, not causal binding. The ~39 pairs within 50 ms are the genuine candidates. Same instrument as Star Tours, different truth: there, 38% measured causation; here, 51% measures editing rhythm.
+2. P1 scored FAIL on the letter (51 pursuits vs predicted <15) with the spirit intact -- all minimum-duration, no sustained tracking.
+3. BUG FOUND AND FIXED: `hva/transcribe.py::_load_with_av` read the whole padded PyAV plane buffer instead of `[:rf.samples]`, inflating decoded audio 1.2194x and stretching every transcript timestamp (first Dr Tran transcript ran to 505 s on a 436 s file). Fixed, committed (54b1a7f), regression test added and verified failing on old logic. Blast radius checked: `hva/stream.py` already sliced (Star Tours AV audio/binding unaffected); `streaming/feeder.py` uses ffmpeg CLI (unaffected); filed Star Tours/FF3 transcripts max within media durations (unaffected).
+
+### Verdict
+The full Sensorium on a dialogue cartoon: the eyes hop (1,444 saccades, 98.7% of cuts chased within 200 ms vs 73% chance), the tracker starves (51 stillborn pursuits), the ears log 588 onsets of people talking. The fixture lesson with numbers on it: the motion pathway is healthy and bored. Nothing about the Star Tours findings needed retracting.
