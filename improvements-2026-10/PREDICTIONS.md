@@ -49,6 +49,102 @@ uniform-dt coincidence over a ±250 ms window expects ≈20%):
 Sealed: Wodehaus, 2026-10-12 (before `binding_baseline.py` was run
 on any canonical run).
 
+---
+
+## Phase 3 — pathways (sealed 2026-10-12)
+
+Items: (8) pursuit egomotion fix — pursuit requires RESIDUAL motion
+(local motion surviving subtraction of the global full-field flow
+estimate), `pursuit_mode: legacy|residual`; (10) content-sensitive
+saccade clock — the streaming decision interval is modulated by the
+batch path's darkness gain and by a causal activity EMA (magno
+motion mean when the channel is on, transient-map mean otherwise),
+clamped to an effective 1.5–5.0/s, `saccade_clock: fixed|adaptive`;
+(13) causal L2 gate — the vis_boost reshape in
+`hva/attention.py` (consumed by `scripts/couple_av.py` pass 3)
+replaces the full-sequence 75th percentile with a trailing-window
+estimator (past 300 moments, current moment excluded, no boost
+until 30 past samples exist), `--gate-mode legacy` kept for A/B.
+
+Legacy baselines (all read from on-disk records before sealing):
+FF3 full run — 1,127 pursuits, 100% ≤ 0.41 s; segment 1200–1500 s:
+**174 pursuits, 100% ≤ 0.41 s**, saccade rates per 60 s bin
+2.65/2.80/2.85/2.70/2.75 (spread 0.20). Star Tours AV — **161
+pursuits, 60.2 s total, all ≤ 0.40 s** (the chaining cadence caps
+durations in the healthy regime too; preservation is therefore
+judged on count and total time, not duration shape). Dr Tran ep4 —
+**51 pursuits**, mean duration 0.39 s. Pink Panther legacy —
+bedroom (0–25 s) **3.44/s**, brawl (25–130 s) **3.43/s**:
+divergence 0.01/s, the metronome in numbers. Calibration (input
+inspection, not validation): PP bedroom vs brawl mean luminance
+0.19–0.32 vs 0.28–0.33 and transient-map means 0.051 vs 0.069 —
+neither separates the regimes; magno motion energy is the signal
+that does, so the clock validation runs with the motion channel
+ON (pursuit off) under both clocks, the fixed run as control.
+
+### Item 8 predictions (pursuit, residual mode)
+
+- **P8.1 (segment legacy check):** the FF3 1200–1500 s segment run
+  under legacy mode reproduces the disease: ≥150 pursuits, ≥98%
+  of durations ≤ 0.41 s.
+- **P8.2 (the fix):** the same segment under residual mode —
+  pursuit count collapses to **≤15% of the legacy segment count**
+  (≤26 if legacy lands at 174).
+- **P8.3 (Star Tours preserved):** full Star Tours under residual
+  mode: pursuit count within **90–230** (legacy 161) and total
+  pursuit time **≥30 s** (legacy 60.2 s). Some drop is expected —
+  ride footage is first-person and part of its legacy "pursuit"
+  is flow-chasing — but the regime must not starve.
+- **P8.4 (Dr Tran stays starved):** ep4 under residual mode:
+  pursuit count **≤76** (≤1.5× legacy 51) and ≥70% of durations
+  still ≤ 0.41 s. The starved regime is a property of the footage,
+  not something the fix should manufacture motion for.
+- **P8.5 (unit level):** synthetic uniform translating texture —
+  residual mode produces **0 pursuits** over a 6 s stream while
+  legacy produces ≥3; a local mover on a static background is
+  pursued in both modes; a local mover on a translating
+  background is pursued under residual mode.
+
+### Item 10 predictions (adaptive saccade clock, Pink Panther)
+
+- **P10.1 (divergence):** adaptive clock, motion on, pursuit off —
+  bedroom (0–25 s) rate **≤2.8/s**, brawl (25–130 s) rate
+  **≥4.0/s**, divergence **≥1.2/s**. Scored a hit if divergence
+  ≥0.8/s with the ordering right (brawl faster), a miss below
+  that, whatever the individual rates do.
+- **P10.2 (control):** the fixed clock under identical settings
+  keeps both segment rates within 3.2–3.7/s with divergence
+  ≤0.3/s — the divergence, if it appears, is the clock's doing.
+- **P10.3 (FF3 honesty check):** on the 1200–1500 s segment under
+  the adaptive clock, the overall rate stays within 2.0–3.6/s and
+  the 60 s-bin spread grows beyond the legacy 0.20 — predicted
+  ≥0.35 — but does not explode (≤1.2). Uniform walking footage
+  should modulate modestly, not wildly.
+
+### Item 13 predictions (causal L2 gate, Dr Tran ep4 inputs)
+
+L2 coupling inputs built for ep4 the way `couple_av.py` builds
+them (batch-ear moments/Tprof from the episode audio; vis_boost
+from the ep4 streaming run's per-frame transient energies, p99
+normalized as in `fuse_av.py`). 4,361 moments expected (436.1 s
+at 100 ms).
+
+- **P13.1:** causal vs legacy gate changes the event label of
+  **≥1% and ≤25%** of moments — some real change, not a rewrite.
+- **P13.2:** ≥60% of the differing moments sit where the gate
+  value actually moved: |vb_shaped_causal − vb_shaped_legacy|
+  ≥ 0.05 at that moment.
+- **P13.3:** onset-capture count under causal mode within
+  **±25%** of the legacy count — the reshape is bounded (≤36%
+  threshold effect), so captures should not swing wildly.
+- **P13.4 (unit level):** with a huge transient appended late,
+  causal-mode traces over the shared prefix are **bit-identical**
+  moment-for-moment; legacy mode demonstrably changes prefix
+  decisions (characterization test, expected to show the leak).
+
+Sealed: Wodehaus, 2026-10-12 (before any Phase 3 code was written
+or any validation run made).
+
 ### Phase 2 scoring (appended 2026-10-12, after the backfill)
 
 Chance rates: **4/4 exact** — FF3 39.7 (pred 39.7), Star Tours
