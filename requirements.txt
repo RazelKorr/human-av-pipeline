@@ -13,8 +13,16 @@ Pillow==10.2.0
 faster-whisper==1.2.1
 av==19.0.0
 
-# Interpretation: CLAP zero-shot labels + music features
-laion-clap==1.1.7
+# Interpretation: CLAP zero-shot labels + music features.
+# NOTE: laion-clap is deliberately NOT in this file. Its metadata caps
+# numpy<2.0.0 while this venv runs numpy 2.5.3 (and CLAP works fine on
+# it -- the cap is stale metadata, verified by the FF3 interpretation
+# run and test_interpret). A single-pass resolve therefore fails.
+# Install it separately with --no-deps AFTER this file; its real deps
+# (librosa, soundfile, torchlibrosa, transformers, scipy) are pinned
+# here:
+#   pip install --no-deps laion-clap==1.1.7
+# (`pip check` will report exactly this one known conflict.)
 librosa==1.0.0
 soundfile==0.14.0
 torchlibrosa==0.1.0

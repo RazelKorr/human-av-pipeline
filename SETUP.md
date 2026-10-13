@@ -41,11 +41,18 @@ python3 -m venv .venv
 .venv/bin/pip install torch==2.14.0+cpu --index-url https://download.pytorch.org/whl/cpu
 
 .venv/bin/pip install -r requirements.txt
+
+# laion-clap separately: its metadata caps numpy<2 but it runs fine on
+# the pinned numpy 2.5.3, so it must bypass the resolver (its real
+# deps are already pinned in requirements.txt):
+.venv/bin/pip install --no-deps laion-clap==1.1.7
 ```
 
 `requirements.txt` is pinned to the versions the current working venv
 runs (numpy 2.5.3 / scipy 1.18.1 era). If a pin and this file disagree,
 the venv's `pip list` is the ground truth — update both.
+`pip check` on a correct rebuild reports exactly one conflict — the
+laion-clap numpy cap above. That one is known and expected.
 
 ## 3. Egress-proxy CA step (required for yt-dlp / HF downloads)
 
