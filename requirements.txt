@@ -34,6 +34,10 @@ huggingface_hub==1.33.0
 # Vocal separation for hva.transcribe --separate-vocals
 demucs==4.1.0
 
+# OCR for diegetic signage (hvp.ocr, experimental): drives the
+# system tesseract binary -- an OS prerequisite, see SETUP.md §1.
+pytesseract==0.3.13
+
 # Media acquisition (pipeline fetch scripts)
 yt-dlp==2026.8.19
 

@@ -14,7 +14,7 @@ and the synthetic batteries — bring your own media for real runs.
 Two test files also depend on local media and skip when it is absent
 (see step 5).
 
-## 1. System prerequisite: ffmpeg
+## 1. System prerequisites: ffmpeg and tesseract
 
 The streaming feeder (`streaming/feeder.py`) and `hva/stream.py` shell
 out to a system `ffmpeg` binary. It is not a pip dependency and is not
@@ -26,6 +26,14 @@ reinstalled before anything streaming works:
 ```bash
 ffmpeg -version   # must succeed before proceeding
 ```
+
+`tesseract` is the same class of prerequisite for the experimental
+OCR module (`hvp/ocr.py`, Phase 5): an OS-level binary (5.3.4 on the
+dev VM at `/usr/bin/tesseract`), driven from the venv by
+pytesseract. Same VM-ephemerality warning — reinstall after a
+rebuild (`apt-get install -y tesseract-ocr`) or OCR raises a
+FileNotFoundError naming the step. Only the OCR module needs it;
+the flagship paths do not.
 
 ## 2. Create the venv and install Python deps
 
