@@ -272,3 +272,65 @@ pairs sit at 0/±50/±100…). Asymmetry: Star Tours audio-after skew
 hit (0.47 vs 0.37), FF3 symmetric hit (0.433 vs 0.435); Dr Tran
 skewed audio-after (0.50 vs 0.37) where I predicted symmetric —
 partial miss.
+
+---
+
+## Phase 4 — fixtures: the quiet/near-silent regime (sealed 2026-10-12)
+
+Item 11's missing regime, built as a GENERATED fixture so it is
+reproducible from the repo alone: `scripts/make_fixtures.py`
+renders `input/quiet_room_60s.mp4` deterministically via ffmpeg
+lavfi — 60 s, 640×360 @ 30 fps, near-black base (0x050505, luma
+≈ 0.020, below DARK_LUM 0.03) with ONE slow faint brightening
+(gaussian, peak +0.045 luma, centered t = 42 s); audio is a
+seeded brown-noise floor at ≈ −58 dBFS with exactly ONE planted
+event: an 880 Hz chime, 0.6 s with 50 ms fades, ≈ −30 dBFS peak,
+at t = 30.0 s.
+
+Runs that score these predictions: (R1) streaming flagship
+settings (motion-weight 1.0, pursuit on — residual is the driver
+default, audio on, 50 ms moments) under the FIXED clock →
+`output/quiet_room_60s/`; (R2) identical under the ADAPTIVE
+clock → `output/quiet_room_60s_adaptive/`; (R3) the batch ear
+(cochlea → salience → moments → `AuditoryAttention.run`, no
+vis_boost — the construction `scripts/couple_av.py` uses) on the
+same audio, because the silence-dwell rule lives only in the
+batch ear; the streaming ear has no dwell rule to engage.
+
+- **P4.1 (onsets):** R1 reports **1–2 audio onsets** total, the
+  strongest within **±0.5 s of t = 30.0 s**. The RMS floor
+  (1e-3) keeps the −58 dBFS floor from onsetting; the chime at
+  ~0.03 peak clears it exactly once (a second pick from the
+  chime's decay is the allowed miss-by-one).
+- **P4.2 (pursuits):** **0 pursuits** in R1 and R2. The fixture
+  has no coherent local motion; the brightening is global and
+  slow, and residual mode subtracts global flow by construction.
+- **P4.3 (motion / binding):** R1 `motion_energies` col-1 mean
+  **< 0.002** (≥6× below Dr Tran ep4's 0.0125, the quietest
+  existing corpus run); visual transients **≤ 3**; **n_av_bound
+  = 0** — the chime (30 s) and the brightening (~42 s) sit 12 s
+  apart, far outside the ±250 ms binding window.
+- **P4.4 (fixed clock is darkness-blind):** R1 saccade rate
+  stays in the metronome band **2.5–3.5/s** (n_saccades
+  150–210 over 60 s) despite the near-dark scene.
+  `_decision_interval_ms` returns the base interval
+  unconditionally in fixed mode — darkness_gain is consulted
+  only by the adaptive branch — so any rate drop in R1 falsifies
+  my reading of the driver.
+- **P4.5 (adaptive clock: darkness observable):** R2 saccade
+  count **≤ 65% of R1's** and **≤ 114** (rate ≤ 1.9/s); median
+  inter-saccade interval **≥ 500 ms** (vs ~290 ms fixed).
+  Mechanism: luminance EMA ≈ 0.02 → darkness_gain ≈ 1.67; the
+  activity EMA sits at the BUSY_MIN clip (0.70) → interval
+  ≈ 681 ms → clipped at CLOCK_MAX_MS 667 ms ≈ 1.5/s.
+- **P4.6 (batch-ear dwell rule engages):** R3 over the 600
+  moments: event **"dwell-quiet" on ≥ 75%** of moments;
+  onset-capture + switch events **≤ 6 total**, all within
+  **2 s after the chime**; **≥ 1 onset-capture within 1.0 s**
+  of t = 30.0 s (the chime's temporal contrast dominates an
+  otherwise silent profile); longest run of consecutive
+  non-capture moments **≥ 250** (25 s).
+
+Sealed: Wodehaus, 2026-10-12 (before `make_fixtures.py` was
+written, before the fixture was generated, before any Phase 4
+run).
