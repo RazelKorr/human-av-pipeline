@@ -334,3 +334,71 @@ batch ear; the streaming ear has no dwell rule to engage.
 Sealed: Wodehaus, 2026-10-12 (before `make_fixtures.py` was
 written, before the fixture was generated, before any Phase 4
 run).
+
+### Phase 4 scoring (appended 2026-10-12, after the runs)
+
+Runs as sealed: R1 fixed clock → `output/quiet_room_60s/`, R2
+adaptive → `output/quiet_room_60s_adaptive/` (both flagship
+settings, pursuit residual per the driver default —
+`run_report.pursuit_mode` confirms "residual"), R3 batch ear
+(trace summary at `output/quiet_room_60s/batch_ear_dwell.json`).
+Fixture as generated: floor RMS 0.0005 (−66 dBFS), chime peak
+0.0266 at 30.0 s, base luma 0.0118, brightening peak 0.0588 at
+42 s. One calibration note: the sealed spec text said floor
+≈ −58 dBFS; the generator's constants were calibrated to
+measured output after the first render and land at −66 dBFS —
+deliberately, since the P4.1 mechanism (the ear's 1e-3 RMS
+gate suppresses the floor) requires the floor under 1e-3.
+The chime (−31 dBFS peak) matches the sealed ≈ −30.
+
+- **P4.1 HIT** — exactly **1 onset, at t = 30.0 s** (strength
+  7.70, moment RMS 0.0102), identical in R1 and R2. The floor
+  produced zero onsets in 60 s.
+- **P4.2 HIT** — **0 pursuits** in both runs.
+- **P4.3 PARTIAL (2 of 3)** — motion energy col-1 mean
+  **0.000000** (max also 0.0: the MotionChannel reads a literal
+  zero on this fixture) and **n_av_bound = 0**, both as sealed.
+  Visual transients **8 vs the sealed ≤3 — MISS.** All 8 sit on
+  the transient-energy column between 35.9 s and 48.1 s — the
+  brightening window. Mechanism: in a near-zero-energy scene
+  the median + 4·MAD threshold collapses toward the ramp's own
+  scale, so one slow global change fragments into repeated
+  threshold crossings as its slope steepens and shallows. The
+  noisy regimes never showed this; the quiet one did on its
+  first run. Filed in FIXTURES.md as a corpus finding.
+- **P4.4 HIT** — R1: **199 saccades, 3.32/s**, median
+  inter-saccade interval exactly 300 ms. The fixed clock is
+  darkness-blind, as read from the driver code.
+- **P4.5 HIT** — R2: **94 saccades = 47% of R1** (sealed
+  ≤65%), **1.57/s** (sealed ≤1.9), median ISI **700 ms**
+  (sealed ≥500). The darkness gain + busy-floor clip land the
+  interval at the 667 ms ceiling for most of the minute, as
+  the sealed mechanism arithmetic said.
+- **P4.6 PARTIAL (3 of 4)** — the capture geography is exact:
+  **1 onset-capture at t = 30.0 s** (target bin 35, the chime),
+  **0 switches**, 1 refractory moment, longest non-capture run
+  **300 moments** (the whole pre-chime half; sealed ≥250).
+  The dwell-quiet fraction **missed: 39.3% vs sealed ≥75%** —
+  60.3% of moments carry event None. Mechanism, read from
+  `hva/attention.py` after the fact: the switch/dwell
+  reconsideration is rate-limited to one per SWITCH_MIN_MS
+  (200 ms), so only about every other 100 ms moment can carry
+  the dwell-quiet label at all; the unlabeled moments are
+  between reconsiderations, not un-dwelled. The rule engaged
+  exactly as designed (dwell-quiet is the modal labeled event;
+  no switch ever fired in 60 s); the sealed fraction modeled
+  the trace as if every moment were labeled. My arithmetic,
+  not the ear's behavior.
+
+Suite after Phase 4: **286 passed, 1 warning, exit 0** (full
+run captured to file and read from the file; 282 at Phase 3 +
+4 new regime tests in `tests/test_fixture_regimes.py`, which
+pass standalone in 23 s). Fixture table committed at
+`tests/fixtures/FIXTURES.md` with all values measured for this
+phase. What the corpus still lacks is listed there: a
+music-dominant row, crossed dark-busy / bright-silent fixtures
+(the quiet room couples dark + silent, so the darkness gate
+and the dwell rule are exercised together, never separately),
+a stereo/spatial row, a short generated smoke fixture, and a
+motion-on rerun of Pink Panther (its run of record predates
+the motion channel being on).
