@@ -209,8 +209,12 @@ def test_driver_no_pursuit_on_global_flash():
 
 
 def test_driver_pursues_constant_velocity_target():
+    # Pins the pursuit mechanism as originally validated (legacy
+    # mode, fallback thumb path). Residual mode's mover behavior
+    # has its own tests below (Phase 3, item 8).
     fps = 30.0
-    d = OnlineAttentionDriver(fps, 30_000.0, motion_weight=1.0, pursuit=True)
+    d = OnlineAttentionDriver(fps, 30_000.0, motion_weight=1.0,
+                              pursuit=True, pursuit_mode="legacy")
     # bright disk gliding right at 45 px/s for 8 s; eyes should find
     # it (bright on dark) and then pursue it
     for i in range(240):
@@ -415,3 +419,205 @@ def test_salience_constants_hold_values():
     assert A.INHIB_SIGMA == 5.0
     assert A.FIX_DISK_SIGMA == 3.5
     assert A.CS_SIGMA == 6.0
+
+
+# --- Adaptive saccade clock (2026-10-12, item 10) ---
+
+def _scanpath_rate(driver, t_lo_ms, t_hi_ms):
+    ts = [t for (t, _, _) in driver.scanpath
+          if t_lo_ms <= t < t_hi_ms]
+    if len(ts) < 2:
+        return 0.0
+    return (len(ts) - 1) / ((ts[-1] - ts[0]) / 1000.0)
+
+
+def _run_regime(clock, kind, n=300, fps=30.0):
+    d = OnlineAttentionDriver(fps, 60_000.0, saccade_clock=clock)
+    rng = np.random.default_rng(2)
+    for i in range(n):
+        t = i * 1000.0 / fps
+        if kind == "dark":
+            fr = np.full((224, 224, 3), 0.01, dtype=np.float32)
+        else:  # bright + busy: fresh block noise every frame --
+            # block-constant so the structure survives the driver's
+            # 56x56 downsample (pixel-iid noise averages away there
+            # and reads as only middling activity, which it is)
+            blocks = rng.random((8, 8, 3), dtype=np.float32) * 0.75 + 0.2
+            fr = np.repeat(np.repeat(blocks, 28, axis=0), 28, axis=1)
+            fr = np.ascontiguousarray(fr, dtype=np.float32)
+        d.push(t, fr)
+    return d
+
+
+def test_adaptive_clock_dark_dwells_busy_hurries():
+    d_dark = _run_regime("adaptive", "dark")
+    d_busy = _run_regime("adaptive", "busy")
+    # skip the first second (EMA warm-up): measure realized rates
+    r_dark = _scanpath_rate(d_dark, 1000.0, 10000.0)
+    r_busy = _scanpath_rate(d_busy, 1000.0, 10000.0)
+    assert r_dark <= 2.2, f"dark regime should dwell, got {r_dark:.2f}/s"
+    assert r_busy >= 4.5, f"busy regime should hurry, got {r_busy:.2f}/s"
+    assert r_busy >= 1.8 * r_dark, (r_dark, r_busy)
+
+
+def test_adaptive_clock_interval_bounds():
+    d_dark = _run_regime("adaptive", "dark")
+    d_busy = _run_regime("adaptive", "busy")
+    for d in (d_dark, d_busy):
+        assert d.decision_intervals, "adaptive clock must log intervals"
+        for (_, iv) in d.decision_intervals:
+            assert 200.0 - 1e-6 <= iv <= 667.0 + 1e-6, iv
+
+
+def test_fixed_clock_ignores_regime():
+    for kind in ("dark", "busy"):
+        d = _run_regime("fixed", kind)
+        r = _scanpath_rate(d, 1000.0, 10000.0)
+        assert 3.1 <= r <= 3.9, f"fixed clock drifted in {kind}: {r:.2f}/s"
+        assert d.decision_intervals == []
+
+
+# --- Residual (egomotion-compensated) pursuit (2026-10-12, item 8) ---
+
+def _blob_field_thumb(seed=3, tw=96, th=54, n_blobs=14):
+    """Sparse bright squares on dark ground: a textured world that
+    can translate rigidly (egomotion) at thumb resolution."""
+    rng = np.random.default_rng(seed)
+    img = np.full((th, tw), 0.05, dtype=np.float32)
+    for _ in range(n_blobs):
+        x = int(rng.integers(4, tw - 8))
+        y = int(rng.integers(4, th - 8))
+        img[y:y + 4, x:x + 4] = 0.9
+    return img
+
+
+def test_residual_global_flow_recovers_translation():
+    mc = M.MotionChannel(96, 54, residual_mode=True)
+    tex = _blob_field_thumb()
+    mc.push(tex, 33.3)
+    mc.push(np.roll(tex, (1, 3), axis=(0, 1)), 33.3)
+    dx, dy = mc.global_flow
+    assert abs(dx - 3) < 0.5 and abs(dy - 1) < 0.5, mc.global_flow
+    assert mc.flow_conf >= M.PC_CONF_MIN
+
+
+def test_residual_channel_cancels_uniform_translation():
+    tex = _blob_field_thumb()
+    means = {}
+    for mode in (False, True):
+        mc = M.MotionChannel(96, 54, residual_mode=mode)
+        es = []
+        for i in range(30):
+            e = mc.push(np.roll(tex, (0, 2 * i), axis=(0, 1)), 33.3)
+            if i > 2:
+                es.append(float(e.mean()))
+        means[mode] = float(np.mean(es))
+    assert means[False] > 0.005, "legacy channel must see the flow"
+    assert means[True] < 0.1 * means[False], \
+        f"residual must cancel egomotion: {means}"
+
+
+def test_residual_channel_keeps_local_mover_on_static_bg():
+    for mode in (False, True):
+        mc = M.MotionChannel(96, 54, residual_mode=mode)
+        bg = np.full((54, 96), 0.05, dtype=np.float32)
+        mc.push(bg, 33.3)
+        fr = bg.copy()
+        fr[25:29, 40:44] = 0.9
+        e = mc.push(fr, 33.3)
+        assert float(e[27, 42]) > 0.1, f"mover lost in mode={mode}"
+
+
+def _ego_frames(n=180, size=224, shift=6, seed=3):
+    """224px frames of a blob field translating rigidly rightward."""
+    rng = np.random.default_rng(seed)
+    tex = np.full((size, size), 0.05, dtype=np.float32)
+    for _ in range(40):
+        x = int(rng.integers(4, size - 14))
+        y = int(rng.integers(4, size - 14))
+        tex[y:y + 10, x:x + 10] = 0.9
+    return [np.stack([np.roll(tex, (0, shift * i), axis=(0, 1))] * 3,
+                     axis=-1) for i in range(n)]
+
+
+def test_driver_egomotion_pursuit_legacy_vs_residual():
+    fps = 30.0
+    frames = _ego_frames()
+    counts = {}
+    for mode in ("legacy", "residual"):
+        d = OnlineAttentionDriver(fps, 20_000.0, motion_weight=1.0,
+                                  pursuit=True, pursuit_mode=mode)
+        for i, fr in enumerate(frames):
+            d.push(i * 1000.0 / fps, fr)
+        counts[mode] = d.n_pursuits
+    assert counts["legacy"] >= 3, \
+        f"legacy should hop-sustain on the flow field: {counts}"
+    assert counts["residual"] == 0, \
+        f"residual must not pursue pure egomotion: {counts}"
+
+
+def test_driver_residual_pursues_local_mover_static_bg():
+    # Frames are pushed with frame_work set -- the production thumb
+    # path (thumbnail derived from the work frame, as the feeder
+    # supplies it). Through the legacy anamorphic fallback thumb
+    # this stimulus is marginal even in legacy mode (1 pursuit in
+    # 8 s), which says something about the fallback, not the fix.
+    fps = 30.0
+    for mode in ("legacy", "residual"):
+        d = OnlineAttentionDriver(fps, 30_000.0, motion_weight=1.0,
+                                  pursuit=True, pursuit_mode=mode)
+        for i in range(240):
+            t = i * 1000.0 / fps
+            fr = _disk_frame(30.0 + i * 1.5, 112.0)
+            d.push(t, fr, frame_work=fr)
+        assert d.n_pursuits > 0, f"mover not pursued in mode={mode}"
+
+
+def test_driver_residual_pursues_mover_on_textured_static_bg():
+    # The identifiable case: a textured, static world (the
+    # correlation votes shift ~0 from the dominant shared
+    # structure) plus one mover. Compensation must leave the
+    # mover's motion intact.
+    fps = 30.0
+    rng = np.random.default_rng(11)
+    tex = np.full((224, 224), 0.05, dtype=np.float32)
+    for _ in range(60):
+        x = int(rng.integers(4, 210))
+        y = int(rng.integers(4, 210))
+        tex[y:y + 8, x:x + 8] = 0.5
+    yy, xx = np.mgrid[0:224, 0:224].astype(np.float32)
+    d = OnlineAttentionDriver(fps, 30_000.0, motion_weight=1.0,
+                              pursuit=True, pursuit_mode="residual")
+    for i in range(240):
+        t = i * 1000.0 / fps
+        fr = tex.copy()
+        cx = 30.0 + i * 1.5
+        fr[np.hypot(xx - cx, yy - 112.0) < 20] = 0.95
+        d.push(t, np.stack([fr] * 3, axis=-1))
+    assert d.n_pursuits > 0, "mover lost against a textured static world"
+
+
+def test_driver_residual_pursues_mover_on_moving_bg():
+    fps = 30.0
+    rng = np.random.default_rng(5)
+    tex = np.full((224, 224), 0.05, dtype=np.float32)
+    for _ in range(40):
+        x = int(rng.integers(4, 210))
+        y = int(rng.integers(4, 210))
+        tex[y:y + 10, x:x + 10] = 0.55
+    yy, xx = np.mgrid[0:224, 0:224].astype(np.float32)
+    d = OnlineAttentionDriver(fps, 30_000.0, motion_weight=1.0,
+                              pursuit=True, pursuit_mode="residual")
+    for i in range(240):
+        t = i * 1000.0 / fps
+        # background drifts LEFT 3 px/frame; a brighter disk moves
+        # RIGHT 2 px/frame against it (starts center: eyes start there)
+        fr = np.roll(tex, (0, -3 * i), axis=(0, 1)).copy()
+        cx = 100.0 + i * 2.0
+        if cx < 210:
+            fr[np.hypot(xx - cx, yy - 112.0) < 16] = 0.95
+        d.push(t, np.stack([fr] * 3, axis=-1))
+    assert d.n_pursuits > 0, "residual pursuit lost the mover"
+    vxs = [vx for (_, _, vx, _) in d.pursuit_log]
+    assert sum(vxs) / len(vxs) > 0, \
+        "pursuit should track the rightward mover, not the leftward flow"

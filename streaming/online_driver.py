@@ -21,7 +21,7 @@ from scipy.ndimage import gaussian_filter
 from hvp import attention as A
 from hvp import baseline as B
 from hvp import motion as M
-from hvp.saccades import SaccadeController
+from hvp.saccades import SaccadeController, darkness_gain
 
 VSIZE = 224  # pass-1 decode size; matches hvp.attention.SIZE
 
@@ -32,6 +32,22 @@ _LUMA = np.array([0.299, 0.587, 0.114], dtype=np.float32)
 # frame (never the anamorphic 224x224 attention frame). Set by the
 # 2026-10-03 thumb-size benchmark; override with motion_thumb_wh.
 DEFAULT_MOTION_THUMB_WH = (96, 54)
+
+# Adaptive saccade clock (2026-10-12, audit item 10). The fixed
+# clock's decision rate measured near-flat across content regimes
+# (FF3 2.9/s in every beat; Pink Panther 3.44/s bedroom vs 3.43/s
+# brawl) -- a metronome with salience steering where, not when.
+# The adaptive clock ports the batch path's principle: the batch
+# darkness gate (hvp.saccades.darkness_gain) stretches dwell in
+# the dark, and a causal activity EMA shortens the interval when
+# the scene is busy. Bounds keep the effective rate in 1.5-5.0/s.
+CLOCK_MIN_MS = 200.0        # fastest decision interval (5.0/s)
+CLOCK_MAX_MS = 667.0        # slowest decision interval (~1.5/s)
+ACT_EMA_TAU_MS = 500.0      # activity/luminance EMA time constant
+ACT_REF_MOTION = 0.010      # magno motion-mean at "normal" activity
+ACT_REF_TRANS = 0.05        # transient-mean at "normal" activity
+BUSY_MIN = 0.70             # quiet scenes: interval / 0.70 max stretch
+BUSY_MAX = 1.60             # busy scenes: interval / 1.60 max shrink
 
 
 def _downsample_thumb(frame, tw, th):
@@ -53,10 +69,40 @@ class OnlineAttentionDriver:
 
     def __init__(self, fps, t_end_ms, chroma_weight=None, motion_weight=None,
                  pursuit=False, motion_thumb_wh=None,
-                 motion_thumb_source="work"):
+                 motion_thumb_source="work", pursuit_mode="residual",
+                 saccade_clock="fixed"):
         self.dt = 1000.0 / float(fps)
         self.t_end = float(t_end_ms)
         self.chroma_weight = chroma_weight
+        # Pursuit motion source (2026-10-12, audit item 8): "legacy"
+        # feeds pursuit the raw coherence-gated diff; "residual"
+        # requires motion that survives egomotion compensation in
+        # the magno channel (see hvp/motion.py). "residual" became
+        # the default after the Phase 3 validation (predictions
+        # scored in improvements-2026-10/PREDICTIONS.md: mechanism
+        # exact at unit level, Star Tours and Dr Tran regimes
+        # preserved, FF3 egomotion chaining cut 159 -> 41 on the
+        # validation segment -- a large collapse that nonetheless
+        # missed the sealed <=15% threshold, on record).
+        if pursuit_mode not in ("legacy", "residual"):
+            raise ValueError("pursuit_mode must be 'legacy' or "
+                             f"'residual', got {pursuit_mode!r}")
+        self.pursuit_mode = pursuit_mode
+        # Saccade decision clock (audit item 10): "fixed" is the
+        # historical SACCADE_RATE_HZ metronome; "adaptive" modulates
+        # the interval by scene luminance and recent activity (see
+        # _decision_interval_ms). The adaptive clock is unit-verified
+        # but its headline Pink Panther prediction missed (the
+        # clip's regimes saturate the activity statistic), so
+        # "fixed" remains the default; see PREDICTIONS.md Phase 3
+        # scoring.
+        if saccade_clock not in ("fixed", "adaptive"):
+            raise ValueError("saccade_clock must be 'fixed' or "
+                             f"'adaptive', got {saccade_clock!r}")
+        self.saccade_clock = saccade_clock
+        self._lum_ema = None       # causal scene-luminance EMA
+        self._act_ema = None       # causal activity EMA
+        self.decision_intervals = []  # (t_ms, interval_ms) diagnostic
         # Magno channel: None/0 = off (v2-identical); a positive weight
         # enables motion-energy salience at that weight.
         self.motion_weight = motion_weight
@@ -75,8 +121,9 @@ class OnlineAttentionDriver:
             raise ValueError("motion_thumb_source must be 'work' or 'attn'")
         self.motion_thumb_source = motion_thumb_source
         tw, th = self.motion_thumb_wh
-        self.motion = (M.MotionChannel(tw, th)
-                       if motion_weight else None)
+        self.motion = (M.MotionChannel(
+            tw, th, residual_mode=(pursuit_mode == "residual"))
+            if motion_weight else None)
         # Smooth pursuit: only meaningful with the motion channel on;
         # default off (v2-identical).
         self.pursuit = bool(pursuit) and self.motion is not None
@@ -148,6 +195,20 @@ class OnlineAttentionDriver:
         self.energies.append((t, static_e, float(chroma_map.mean()),
                               float(self.trans.mean())))
         self.n_frames += 1
+        # Adaptive-clock signals (causal EMAs, updated every frame
+        # before any decision that uses them): scene luminance and
+        # activity -- the magno motion mean when the channel is on
+        # (it is the signal that separates quiet rooms from brawls),
+        # else the visual transient mean.
+        act_inst = (float(motion_map.mean()) if motion_map is not None
+                    else float(self.trans.mean()))
+        alpha = 1.0 - float(np.exp(-self.dt / ACT_EMA_TAU_MS))
+        if self._lum_ema is None:
+            self._lum_ema = float(small.mean())
+            self._act_ema = act_inst
+        else:
+            self._lum_ema += alpha * (float(small.mean()) - self._lum_ema)
+            self._act_ema += alpha * (act_inst - self._act_ema)
 
         decided = []
         if t >= self.next_decision:
@@ -204,8 +265,25 @@ class OnlineAttentionDriver:
                 # No inhibition of return while pursuing: the whole
                 # point is to stay with the target.
                 self.inhib.append((ix, iy, t))
-            self.next_decision = t + 1000.0 / B.SACCADE_RATE_HZ
+            self.next_decision = t + self._decision_interval_ms(t)
         return decided
+
+    def _decision_interval_ms(self, t_now):
+        """Ms until the next saccade decision. Fixed mode: the
+        historical SACCADE_RATE_HZ interval, always. Adaptive mode:
+        base x darkness_gain(scene luminance) / busy, where busy is
+        the activity EMA relative to its reference level, clipped
+        to [CLOCK_MIN_MS, CLOCK_MAX_MS] overall. Every input is a
+        causal EMA of past frames only."""
+        base = 1000.0 / B.SACCADE_RATE_HZ
+        if self.saccade_clock == "fixed" or self._act_ema is None:
+            return base
+        ref = ACT_REF_MOTION if self.motion is not None else ACT_REF_TRANS
+        busy = float(np.clip(self._act_ema / ref, BUSY_MIN, BUSY_MAX))
+        interval = base * darkness_gain(self._lum_ema) / busy
+        interval = float(np.clip(interval, CLOCK_MIN_MS, CLOCK_MAX_MS))
+        self.decision_intervals.append((float(t_now), interval))
+        return interval
 
     def _maybe_pursue(self, t):
         """Try to start a smooth-pursuit glide at decision time t.

@@ -94,6 +94,18 @@ def main():
                     help="enable smooth-pursuit tracking of coherently "
                          "moving targets (needs --motion-weight; off = "
                          "v2-identical)")
+    ap.add_argument("--pursuit-mode", default=None,
+                    choices=["legacy", "residual"],
+                    help="pursuit motion source: 'legacy' = raw "
+                         "coherence-gated diff; 'residual' = egomotion-"
+                         "compensated (audit item 8). Default: the "
+                         "driver's current default")
+    ap.add_argument("--saccade-clock", default=None,
+                    choices=["fixed", "adaptive"],
+                    help="saccade decision clock: 'fixed' = the "
+                         "historical rate; 'adaptive' = luminance + "
+                         "activity modulated (audit item 10). "
+                         "Default: the driver's current default")
     ap.add_argument("--motion-thumb", default=None, metavar="WxH",
                     help="magno-channel thumbnail size, e.g. 160x90 "
                          "(default: 96x54 16:9; the benchmarked winner "
@@ -187,12 +199,18 @@ def main():
                            dual_decode=args.dual_decode,
                            single_mode=args.single_mode,
                            motion_thumb_wh=feeder_thumb_wh)
+    driver_kw = {}
+    if args.pursuit_mode is not None:
+        driver_kw["pursuit_mode"] = args.pursuit_mode
+    if args.saccade_clock is not None:
+        driver_kw["saccade_clock"] = args.saccade_clock
     driver = OnlineAttentionDriver(fps, t_end_ms,
                                    chroma_weight=args.chroma_weight,
                                    motion_weight=args.motion_weight,
                                    pursuit=args.pursuit,
                                    motion_thumb_wh=motion_thumb_wh,
-                                   motion_thumb_source=args.motion_thumb_source)
+                                   motion_thumb_source=args.motion_thumb_source,
+                                   **driver_kw)
     sx, sy = w / 224.0, h / 224.0
     dva2 = B.FIELD_WIDTH_DEG / w
     render = OnlineVisionPipeline((h, w, 3), dva2, [(0, w / 2.0, h / 2.0)],
@@ -419,6 +437,8 @@ def main():
         "motion_weight": args.motion_weight,
         "pursuit": bool(args.pursuit),
         "pursuit_effective": bool(driver.pursuit),
+        "pursuit_mode": driver.pursuit_mode,
+        "saccade_clock": driver.saccade_clock,
         "frames_pushed": n_frames,
         "moments_pulled": n_moments,
         "wall_clock_s": round(wall_total, 1),

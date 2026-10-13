@@ -21,6 +21,25 @@ horizontally (~11.4x vs ~6.4x downsampling), so pursuit velocities
 and motion centroids were systematically wrong in x. All map-px
 constants scale from the 56-reference: velocities are calibrated in
 deg/s (3.6..107) and converted per thumb width.
+
+Residual mode (2026-10-12, audit item 8): the coherence gate above
+removes *uniform* floods, but egomotion (camera walking through a
+static world) is not uniform in the diff map -- textured ground,
+walls and furniture all produce strong local diffs everywhere, and
+the pursuit logic happily hop-sustains on the flow field (FF3:
+1,127 of 1,127 pursuits at exactly the minimum duration). Residual
+mode estimates the global translation (phase correlation on the
+thumbnail, subpixel via peak-neighborhood centroid) and computes
+the frame difference AFTER motion-compensating the previous frame
+by that shift (Fourier shift theorem, so fractional shifts align
+exactly). Pure camera motion cancels to ~zero; what survives is
+residual motion -- things moving differently from the world. The
+compensated diff then goes through the same local-coherence gate
+as before: the gate was not replaced, it is fed a better input.
+Compensation is confidence-gated: when the correlation peak is
+diffuse (PC_CONF_MIN) there is no decisive global flow -- a static
+scene with one small mover, say -- and the plain diff is used, so
+a meaningless shift estimate can never eat real content.
 """
 
 import numpy as np
@@ -48,6 +67,16 @@ PURSUIT_MIN_ENERGY = 0.03  # min local motion energy at fixation to pursue
 # validated 56-reference behavior).
 GATE_DIRECT_MAX_W = 128
 GATE_WORK_W = 64
+# Residual mode: minimum phase-correlation peak height for the
+# global-flow estimate to be trusted. A genuine full-field
+# translation of textured content peaks decisively (>>0.1); a
+# static scene or a single small mover gives a diffuse surface.
+PC_CONF_MIN = 0.10
+# Below this fraction of structurally non-flat prev-frame pixels,
+# global flow is unidentifiable (too little shared structure to
+# separate camera motion from the one moving thing): never
+# compensate.
+FLOW_MIN_COVERAGE = 0.03
 
 
 class MotionChannel:
@@ -60,7 +89,8 @@ class MotionChannel:
     (possibly downsampled) gaussian, and a threshold.
     """
 
-    def __init__(self, thumb_w=96, thumb_h=54, tau_ms=TAU_MS):
+    def __init__(self, thumb_w=96, thumb_h=54, tau_ms=TAU_MS,
+                 residual_mode=False):
         tw, th = int(thumb_w), int(thumb_h)
         if tw < 1 or th < 1:
             raise ValueError(
@@ -71,6 +101,18 @@ class MotionChannel:
             raise ValueError(f"tau_ms must be > 0, got {tau_ms!r}")
         self.thumb_w = tw
         self.thumb_h = th
+        # Residual (egomotion-compensated) differencing; see module
+        # docstring. Legacy mode (False) is the pre-2026-10-12
+        # behavior, bit-identical.
+        self.residual_mode = bool(residual_mode)
+        self.global_flow = (0.0, 0.0)  # last estimate (dx, dy), thumb-px/frame
+        self.flow_conf = 0.0           # its correlation-peak height
+        win = (np.hanning(th)[:, None] * np.hanning(tw)[None, :])
+        self._pc_window = win.astype(np.float32)
+        fy = np.fft.fftfreq(th)[:, None]
+        fx = np.fft.fftfreq(tw)[None, :]
+        self._pc_fy = fy
+        self._pc_fx = fx
         tw, th = self.thumb_w, self.thumb_h
         self.energy = np.zeros((th, tw), dtype=np.float32)
         self.prev = None
@@ -109,6 +151,49 @@ class MotionChannel:
             _Im.fromarray(blurred.astype(np.float32), mode="F")
                .resize((tw, th), _Im.BILINEAR), dtype=np.float32)
 
+    def _estimate_global_shift(self, prev, cur):
+        """Global translation of cur relative to prev, in thumb-px
+        (dx, dy, peak): windowed phase correlation, subpixel by a
+        centroid over the peak's 5x5 neighborhood (weights above
+        half the peak height). Parabolic refinement was tried first
+        and is biased on resampled content (it read 2.10/3.00 px
+        for a true 2.66 px thumb shift); the centroid recovers the
+        true shift and cuts the compensated residual ~7x vs the
+        raw diff. Shifting prev by (dx, dy) (Fourier shift theorem)
+        aligns it onto cur."""
+        w = self._pc_window
+        F = np.fft.fft2(cur * w)
+        G = np.fft.fft2(prev * w)
+        R = F * np.conj(G)
+        R /= (np.abs(R) + 1e-12)
+        r = np.fft.ifft2(R).real
+        th, tw = prev.shape
+        py, px = np.unravel_index(int(np.argmax(r)), r.shape)
+        peak = float(r[py, px])
+        dx = px - tw if px > tw // 2 else px
+        dy = py - th if py > th // 2 else py
+        numx = numy = den = 0.0
+        for oy in range(-2, 3):
+            for ox in range(-2, 3):
+                v = float(r[(py + oy) % th, (px + ox) % tw]) - 0.5 * peak
+                if v > 0.0:
+                    numx += v * ox
+                    numy += v * oy
+                    den += v
+        if den > 0.0:
+            dx += numx / den
+            dy += numy / den
+        return float(dx), float(dy), peak
+
+    def _shift_frame(self, frame, dx, dy):
+        """Translate frame by (dx, dy) px (content moves right/down
+        for positive values), Fourier shift theorem; wraps at the
+        edges like np.roll."""
+        F = np.fft.fft2(frame)
+        phase = np.exp(-2j * np.pi * (self._pc_fx * dx
+                                      + self._pc_fy * dy))
+        return np.real(np.fft.ifft2(F * phase)).astype(np.float32)
+
     def push(self, small, dt_ms, t_ms=None):
         small = np.asarray(small, dtype=np.float32)
         if small.shape != (self.thumb_h, self.thumb_w):
@@ -130,6 +215,49 @@ class MotionChannel:
         if self.prev is not None:
             raw = np.abs(small - self.prev).astype(np.float32)
             self.flood_frac = float((raw > THRESH).mean())
+            if self.residual_mode:
+                # Egomotion compensation: estimate the global shift,
+                # align prev onto small, and difference against the
+                # aligned copy. flood_frac above stays the honest
+                # uncompensated diagnostic. Compensation applies
+                # only on a decisive correlation peak; otherwise the
+                # plain diff stands (no confident global flow). The
+                # Fourier-shift wrap strip (content wrapped from the
+                # far edge) is zeroed -- it is not real motion, it
+                # is the torus artifact.
+                dx, dy, conf = self._estimate_global_shift(self.prev,
+                                                           small)
+                self.global_flow = (dx, dy)
+                self.flow_conf = conf
+                # Identifiability guard: global flow is only
+                # identifiable when enough of the frame carries
+                # shared structure. On a near-featureless frame the
+                # one moving object IS the correlation peak, and
+                # "compensating" for it would cancel the mover
+                # itself; phase correlation still returns a sharp-
+                # looking peak there, and its wrap-strip zeroing
+                # would eat real content. Below the coverage floor
+                # the plain diff stands.
+                med = float(np.median(self.prev))
+                coverage = float((np.abs(self.prev - med)
+                                  > 0.05).mean())
+                if coverage < FLOW_MIN_COVERAGE:
+                    dx = dy = 0.0
+                if conf >= PC_CONF_MIN and (dx or dy):
+                    aligned = self._shift_frame(self.prev, dx, dy)
+                    raw = np.abs(small - aligned).astype(np.float32)
+                    by = int(np.ceil(abs(dy)))
+                    bx = int(np.ceil(abs(dx)))
+                    if by > 0:
+                        if dy > 0:
+                            raw[:by, :] = 0.0
+                        else:
+                            raw[-by:, :] = 0.0
+                    if bx > 0:
+                        if dx > 0:
+                            raw[:, :bx] = 0.0
+                        else:
+                            raw[:, -bx:] = 0.0
             # Local-coherence gate: uniform floods cancel, local
             # motion contrast survives.
             local = raw - self._gate(raw)
