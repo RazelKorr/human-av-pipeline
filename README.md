@@ -126,6 +126,9 @@ python3 scripts/demo_vision.py      # vision validation battery
 python3 -m hva.battery              # audio validation battery (from repo root)
 # Fusion needs a video + its audio side by side; see scripts/fuse_av.py
 # --help. input/ and output/ are gitignored: bring your own media.
+# The regime fixture corpus (what each fixture is for, measured):
+# tests/fixtures/FIXTURES.md; the quiet-room fixture is generated
+# by scripts/make_fixtures.py.
 ```
 
 Speech transcription needs the venv (faster-whisper fights
