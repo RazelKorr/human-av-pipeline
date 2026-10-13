@@ -1,4 +1,4 @@
-"""Battery for the human-audio pipeline: five synthetic checks that the
+"""Battery for the human-audio pipeline: six synthetic checks that the
 ears behave like ears. Mirrors hvp/battery.py's T0-T4.
 
 Each test synthesizes audio, runs the full pipeline
@@ -285,3 +285,11 @@ def run_all(seed=7):
               f"{ {k: v for k, v in r.items() if k != 'pass'} }",
               flush=True)
     return results
+
+
+if __name__ == "__main__":
+    import sys
+    results = run_all()
+    n = sum(1 for r in results.values() if r.get("pass"))
+    print(f"{n}/{len(results)} passed")
+    sys.exit(0 if n == len(results) else 1)

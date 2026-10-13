@@ -9,6 +9,13 @@ This is a research demo, not a validated model of perception or
 consciousness. Every constant is provisional and every mechanism is
 meant to be argued with.
 
+One grain note before the details: perceptual moments come in two
+sizes. The batch path described below emits 100 ms moments (10 Hz);
+the streaming flagship path (`streaming/`, which produced the recent
+full-film reviews) emits 50 ms moments (20 Hz). Same pipeline family,
+different clock -- check which grain a given run used before comparing
+its numbers.
+
 ## The two systems
 
 **`hva/` -- the ears.** Cochlea (16 kHz STFT, 64 log bins 50 Hz-8 kHz,
@@ -42,7 +49,7 @@ fusion, wagon-wheel reversal, saccadic suppression, change blindness --
 - **Level 3** (`hvm/`, `scripts/run_level3.py`): joint priority map --
   one shared 56x56 landscape both systems write to and read from.
   Saccades land from the joint map; auditory attention reads spatial
-  gains back. Battery 5/5; real-media demo included. See SPEC_FUSION.md.
+  gains back. Battery 6/6; real-media demo included. See SPEC_FUSION.md.
 
 **`scripts/watch.py`** ties all three together: feed it a video and it
 watches it the way the model predicts a human would -- vision pipeline on the frames,
@@ -63,7 +70,7 @@ events instead of anonymous transients -- the pipeline can now hear
 transcription (superhuman: no human catches every word); confidence
 scores are recorded as the hook for a future mishearing model, and
 transcription-is-not-comprehension is explicitly deferred. Requires
-the pipeline venv (`../.venv-pipeline`, relative to the repo root) --
+the repo venv (`./.venv`, at the repo root; see SETUP.md) --
 system Pythons managed by the OS fight the install. Model weights live in
 `models/faster-whisper-base` (gitignored, downloaded once).
 
@@ -125,13 +132,13 @@ Speech transcription needs the venv (faster-whisper fights
 OS-managed system Pythons):
 
 ```bash
-python3 -m venv ../.venv-pipeline
-../.venv-pipeline/bin/pip install faster-whisper numpy
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 # model weights: see hva/transcribe.py MODEL_DIR (models/faster-whisper-base,
 # gitignored -- download once, ~150 MB)
-../.venv-pipeline/bin/python scripts/transcribe.py \
+.venv/bin/python -m hva.transcribe \
     --wav input/clip_16k.wav --out output/transcripts/clip.json
-
+```
 ## Status
 
 Experimental. The constants are provisional, the batteries are

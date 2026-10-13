@@ -192,3 +192,14 @@ def test_change_blindness(n_seeds=6, max_cycles=25):
             "example_masked_run": example, "pass": ok,
             "detail": f"no-mask {m_no:.1f} cycles vs masked {m_mask:.1f} "
                       f"(censored at {max_cycles}); expect ~2 vs >>8"}
+
+
+if __name__ == "__main__":
+    import sys
+    results = run_all()
+    for name, r in results.items():
+        print(f"  {'PASS' if r.get('pass') else 'FAIL'}  {name}\n"
+              f"        {r.get('detail', '')}")
+    n = sum(1 for r in results.values() if r.get("pass"))
+    print(f"{n}/{len(results)} passed")
+    sys.exit(0 if n == len(results) else 1)
