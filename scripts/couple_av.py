@@ -15,6 +15,7 @@ Outputs (output/fused/):
   av_coupled.jsonl   -- joint feed from the coupled run
   couple_report.txt  -- comparison numbers
 """
+import argparse
 import json
 import os
 import sys
@@ -38,6 +39,14 @@ DWELL = os.path.join(ROOT, "output", "star_tours_62s", "dwell")
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--gate-mode", default="causal",
+                    choices=["causal", "legacy"],
+                    help="vis_boost gate: 'causal' = trailing-window "
+                         "75th percentile (audit item 13, default); "
+                         "'legacy' = full-sequence percentile (leaks "
+                         "future transients; A/B comparison only)")
+    args = ap.parse_args()
     os.makedirs(OUTDIR, exist_ok=True)
 
     # ---- Pass 1: audio onsets + pan ----
@@ -80,7 +89,7 @@ def main():
     Tprof = np.stack([_tprof(i) for i in range(len(moms))])
     vb = vis_trans[:len(moms)]
     att = AT.AuditoryAttention(cf_init=32.0)
-    trace = att.run(moms, Tprof, vis_boost=vb)
+    trace = att.run(moms, Tprof, vis_boost=vb, gate_mode=args.gate_mode)
     n_cap = sum(1 for m in trace if m["event"] == "onset-capture")
     n_sw = sum(1 for m in trace if m["event"] == "switch")
     print(f"Pass 3: audio re-run -> {n_cap} captures, {n_sw} switches")
@@ -151,6 +160,7 @@ def main():
 
     rep = [
         "Level 2 coupling report (Star Tours 0-62s)",
+        f"vis_boost gate mode: {args.gate_mode}",
         f"audio onsets driving vision: {len(onsets)}",
         "",
         "(a) saccade landing error vs panned onset side (px, 224 space):",

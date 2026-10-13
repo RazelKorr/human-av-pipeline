@@ -158,3 +158,89 @@ def test_load_audio_no_plane_padding_inflation(tmp_path):
          "-shortest", vid], check=True)
     x = load_audio(vid, target_sr=16000)
     assert abs(len(x) / 16000 - 3.0) < 0.1, f"inflated: {len(x)/16000:.2f}s"
+
+
+# --- Causal L2 vis_boost gate (2026-10-12, audit item 13) ---
+
+from hva.attention import (AuditoryAttention, shaped_vis_boost,
+                           GATE_WINDOW, GATE_WARMUP)
+
+
+def _vb_pair(n=500, split=400, seed=4):
+    """Two vis_boost series identical up to `split`; the second
+    grows a huge transient afterwards."""
+    rng = np.random.default_rng(seed)
+    vb = rng.random(n) * 0.6
+    vb2 = vb.copy()
+    vb2[split + 10] = 1.0
+    vb2[split + 50:] = 1.0
+    return vb, vb2, split
+
+
+def test_causal_gate_prefix_invariance():
+    vb, vb2, split = _vb_pair()
+    s1 = shaped_vis_boost(vb, "causal")
+    s2 = shaped_vis_boost(vb2, "causal")
+    # Nothing at or before the split may change: the causal gate at
+    # moment k reads only moments < k and vb[k] itself.
+    assert np.array_equal(s1[:split + 1], s2[:split + 1])
+
+
+def test_legacy_gate_leaks_future_characterization():
+    # Characterization of the OLD behavior (kept for A/B): the
+    # full-sequence percentile lets a late transient rewrite early
+    # gate values. This test documents the leak; it must keep
+    # passing as long as legacy mode exists.
+    vb, vb2, split = _vb_pair()
+    s1 = shaped_vis_boost(vb, "legacy")
+    s2 = shaped_vis_boost(vb2, "legacy")
+    assert not np.array_equal(s1[:split], s2[:split]), \
+        "legacy gate no longer leaks -- has it been removed?"
+
+
+def test_causal_gate_warmup_blocks_early_boost():
+    vb = np.ones(200)
+    s = shaped_vis_boost(vb, "causal")
+    assert np.all(s[:GATE_WARMUP] == 0.0), \
+        "no boost may fire before GATE_WARMUP past moments exist"
+
+
+def test_causal_gate_window_forgets_old_transients():
+    # After the huge block: a 3:1 pattern of 0.4 with 0.6 every
+    # fourth moment, so the trailing q75 sits near 0.4 once the
+    # block leaves the window.
+    vb = np.concatenate(
+        [np.ones(100),
+         np.tile([0.4, 0.4, 0.4, 0.6], 200)]).astype(np.float64)
+    s = shaped_vis_boost(vb, "causal")
+    # While the huge block is inside the trailing window its q75
+    # pins the gate shut (index 151 is a 0.6 moment).
+    assert vb[151] == 0.6 and s[151] == 0.0
+    # Long after it leaves the window, the same 0.6 moment earns a
+    # boost against its quieter neighborhood.
+    assert vb[803] == 0.6 and s[803] > 0.0
+
+
+def _synthetic_moms(n=600, seed=1):
+    rng = np.random.default_rng(seed)
+    moms = []
+    for k in range(n):
+        sal = (rng.random(64) * 2.0).astype(np.float32)
+        tmax = 20.0 if k % 37 == 0 else 3.0
+        moms.append({"t0": k * 0.1, "t1": k * 0.1 + 0.1,
+                     "sal": sal, "Tmax": tmax, "loud": 0.5})
+    Tprof = (rng.random((n, 64)) * 5.0).astype(np.float32)
+    return moms, Tprof
+
+
+def test_causal_gate_trace_prefix_identical():
+    # End-to-end: two attention runs whose vis_boost differs only
+    # after the split must produce identical traces up to it.
+    vb, vb2, split = _vb_pair(n=600, split=400)
+    moms, Tprof = _synthetic_moms(600)
+    tr1 = AuditoryAttention().run(moms, Tprof, vis_boost=vb,
+                                  gate_mode="causal")
+    tr2 = AuditoryAttention().run(moms, Tprof, vis_boost=vb2,
+                                  gate_mode="causal")
+    for a, b in zip(tr1[:split], tr2[:split]):
+        assert a["event"] == b["event"] and a["cf_bin"] == b["cf_bin"]

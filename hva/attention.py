@@ -38,12 +38,52 @@ SUPPRESS_ONSET_X = 3.0 # right after a switch, onsets need 3x the evidence
                        # (the attentional blink -- the ears' analog of
                        # saccadic suppression)
 ONSET_LATENCY_MS = 50.0
+GATE_WINDOW = 300      # causal vis_boost gate: trailing moments
+                       # (30 s at the 100 ms moment grid)
+GATE_WARMUP = 30       # causal gate: no boost until this many past
+                       # moments exist -- insufficient evidence
+                       # cannot lower the capture bar
 SILENCE_LOUD = 0.15    # below this loudness: dwell, don't switch
 ATT_GAIN = 1.5         # attentional gain on the attended band: the
                        # fovea's resolution advantage. Attended channels
                        # get enhanced processing (Fritz et al. 2003),
                        # which is also what makes an attended change
                        # noticeable and an unattended one missable.
+
+
+def shaped_vis_boost(vis_boost, gate_mode="causal"):
+    """Reshape a per-moment visual-transient series in [0,1] so
+    only the top quartile gets a vote (see run()). Two gate modes:
+
+    "causal" (2026-10-12, audit item 13; the default): the 75th
+    percentile is a TRAILING estimator -- moments strictly before
+    k, at most GATE_WINDOW of them, and moment k gets no boost
+    until GATE_WARMUP past moments exist. A transient late in the
+    sequence cannot change any earlier gate value.
+
+    "legacy": the pre-2026-10-12 behavior -- the percentile is
+    taken over the WHOLE sequence, which leaks future transients
+    into early decisions. Kept for A/B comparison only.
+    """
+    vb_arr = np.asarray(vis_boost, dtype=np.float64)
+    if gate_mode == "legacy":
+        if vb_arr.size == 0:
+            return vb_arr.copy()
+        q75 = float(np.percentile(vb_arr, 75.0))
+        return np.clip((vb_arr - q75) / max(1.0 - q75, 1e-9),
+                       0.0, 1.0)
+    if gate_mode == "causal":
+        out = np.zeros_like(vb_arr)
+        for k in range(len(vb_arr)):
+            hist = vb_arr[max(0, k - GATE_WINDOW):k]
+            if len(hist) < GATE_WARMUP:
+                continue
+            q75 = float(np.percentile(hist, 75.0))
+            out[k] = np.clip((vb_arr[k] - q75) / max(1.0 - q75, 1e-9),
+                             0.0, 1.0)
+        return out
+    raise ValueError(f"gate_mode must be 'causal' or 'legacy', "
+                     f"got {gate_mode!r}")
 
 
 class AuditoryAttention:
@@ -66,22 +106,22 @@ class AuditoryAttention:
                     -((bins - cf0) ** 2) / (2 * IOR_SIGMA ** 2))
         return np.clip(b, 0, 1) * 0.5
 
-    def run(self, moms, Tprof, vis_boost=None):
+    def run(self, moms, Tprof, vis_boost=None, gate_mode="causal"):
         """moms: list of moment dicts. Tprof: per-moment temporal-
         contrast profile, (n_moments, 64). vis_boost: optional per-moment
         array in [0,1] of visual transient strength (Level 2 cross-modal
-        coupling) -- a flash makes you listen harder. Returns trace: one
-        dict per moment with the attended band and what happened."""
+        coupling) -- a flash makes you listen harder. gate_mode selects
+        the vis_boost reshape (see shaped_vis_boost): "causal" trailing
+        percentile (default), "legacy" full-sequence percentile.
+        Returns trace: one dict per moment with the attended band and
+        what happened."""
         trace = []
         vb_shaped = None
         if vis_boost is not None:
             # Reshape: only the top quartile of visual transients gets a
             # vote. The film is always wiggling a little; only the
             # genuinely busy moments lower the auditory bar.
-            vb_arr = np.asarray(vis_boost, dtype=np.float64)
-            q75 = float(np.percentile(vb_arr, 75.0))
-            vb_shaped = np.clip((vb_arr - q75) / max(1.0 - q75, 1e-9),
-                                0.0, 1.0)
+            vb_shaped = shaped_vis_boost(vis_boost, gate_mode)
         for k, m in enumerate(moms):
             t0, t1 = m["t0"], m["t1"]
             # land pending switches
