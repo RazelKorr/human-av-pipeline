@@ -372,7 +372,7 @@ def main():
         e_tot = [r[1] + r[2] + r[3] for r in driver.energies]
         vtrans = visual_transients(e_tot, frame_t_log)
         binding = bind_av([(o["t_s"], o["strength"]) for o in audio_events],
-                          vtrans)
+                          vtrans, duration_s=total)
         with open(os.path.join(args.outdir, "av_binding.json"), "w") as f:
             json.dump(binding, f, indent=2)
         print(f"wrote av_binding.json ({binding['n_bound']}/"
