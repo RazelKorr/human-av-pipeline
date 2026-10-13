@@ -417,3 +417,117 @@ and the dwell rule are exercised together, never separately),
 a stereo/spatial row, a short generated smoke fixture, and a
 motion-on rerun of Pink Panther (its run of record predates
 the motion channel being on).
+
+---
+
+## Phase 5 — new capabilities (sealed 2026-10-12)
+
+Items: (15) mishearing model — `hva/mishear.py`: for transcript
+segments below the interpret.py escalation threshold
+(avg_logprob < −0.8), low-probability words get phonetically
+plausible alternative readings (self-contained Metaphone-lite key
++ whisper-tokenizer-vocabulary candidate lookup, rescored by word
+prob × phonetic distance). Modeled mishearings are MODEL OUTPUT,
+labeled as such; the verbatim text is never replaced — the
+standing rule (transcription claims carry logprobs or they don't
+ship) is the module's reason to exist. (17) OCR for diegetic
+signage — `hvp/ocr.py`, pluggable engine; tesseract 5.3.4 is
+present on this machine (checked before sealing, per the task's
+own recon step) and pytesseract 0.3.13 installed into the venv
+cleanly. (14) stem-stream experiment — `scripts/stem_streams.py`:
+demucs stems, each stem through hva/online.py features + onset
+picking + transcription/CLAP, emitting per-stem streams. All
+three are experimental additions; flagship streaming defaults
+are not rewired.
+
+### Item 15 predictions (mishearing model; demo = FF3 1649.7 s)
+
+Demo input: `output/ff3_hd_av/onset_1649.7s.wav` re-transcribed
+with whisper base + word timestamps (the stored phase-1 record
+carries no per-word probs), then modeled. Facts on record before
+sealing: base read this window "We're in Marvel!" (avg_logprob
+−0.877); the medium tier resolved it to non-lexical vocalizations
+— "BLEH", "NOOOO", "Oh, yeah, watch out!" (interpretation record
+536) — i.e. screams, per the review.
+
+- **P15.1 (gate fires):** the re-transcription contains a segment
+  whose text includes "Marvel" with avg_logprob < −0.7, so the
+  segment is modeled (threshold −0.8; −0.7 leaves segmentation
+  wobble room while staying an honest low-confidence call).
+- **P15.2 (the doubtful word):** the word "Marvel" itself carries
+  prob < 0.6 and receives ≥1 modeled alternative whose phonetic
+  key matches exactly (same-key tier, not the near-key tier).
+- **P15.3 (the honest limitation):** NONE of the modeled
+  alternatives, for any word in the window, recovers the medium
+  tier's resolution — no alternative reading is "BLEH", "NOOOO",
+  or a scream vocalization. The model proposes lexical neighbors
+  of the words the base tier *thought* it heard; it cannot know
+  the sound was non-lexical. If this hits, it is the finding,
+  not a failure of the demo: the mishearing model annotates
+  doubt, it does not correct hallucinations into truth.
+- **P15.4 (gate discipline):** every segment in the window with
+  avg_logprob ≥ −0.8 (if any exist after re-transcription)
+  yields zero modeled mishearings. (Unit tests pin this
+  unconditionally; the demo scores it only if such a segment
+  exists, else it is vacuous and will be reported as vacuous.)
+
+### Item 17 predictions (OCR; synthetic fixture + Star Tours)
+
+Synthetic fixture: PIL-rendered frames (1280×720, DejaVu Sans,
+white on near-black), one word/phrase per frame at font sizes
+48 / 32 / 24 / 18 / 14 / 10 px: FUEL, DANGER, EXIT 7, HANGAR,
+BAY 12, FUEL. Scored exact-match = OCR text (uppercased,
+stripped) equals ground truth; word-match = the ground-truth
+word appears among the OCR tokens.
+
+- **P17.1 (large text reads):** exact match 3/3 at sizes
+  48 / 32 / 24.
+- **P17.2 (the failure threshold):** exact match FAILS at
+  ≤14 px (both the 14 and 10 px frames), and the 18 px frame
+  lands between: word-match without exact match, or a miss —
+  i.e. the exact-match cliff sits between 24 and 14 px.
+- **P17.3 (Star Tours, qualitative only):** on a handful of
+  frames from the ride film at moments with known signage, OCR
+  reads at least one real sign substantially correctly and
+  misses or garbles most small in-world text. No rate is
+  claimed — the sample is chosen, not random.
+
+### Item 14 predictions (stem streams; synthetic mix + ST demo)
+
+Synthetic mix, built deterministically: speech = a 20 s excerpt
+of the separated Star Tours vocals stem
+(`separated/mdx_extra/star_tours_full_16k/vocals.wav`) whose
+pre-mix transcript is taken as ground truth; music = a
+synthesized tone sequence (sine bursts + chord pads at planted
+times); mixed with the music at −6 dB relative to the speech
+RMS. The mix goes through demucs two-stems (`--separate-vocals`
+path), then per-stem features/onsets/transcription/CLAP.
+
+- **P14.1 (vocals stem keeps the words):** token containment of
+  the ground-truth transcript in the vocals-stem transcript
+  (fraction of ground-truth word tokens, lowercased, that appear
+  in the stem transcript) ≥ 0.6.
+- **P14.2 (music stem is music, not speech):** the no_vocals
+  stem's aggregate CLAP top-1 label is a music-like label
+  ("music" or "singing"), AND its transcript is empty or
+  garbage-flagged: ≥ half its segments (if any) below
+  avg_logprob −0.8.
+- **P14.3 (stems are sparser than the mix):** onset count of
+  EACH stem stream < the mixed stream's onset count on the same
+  20 s (planted tone bursts will onset in the mix and in the
+  music stem; speech onsets likewise; each stem should carry
+  roughly its own source's events, not the union).
+- **P14.4 (real-world demo, 60 s of Star Tours):** the vocals
+  stem yields ≥1 transcript segment with avg_logprob ≥ −0.8
+  (intelligible speech recovered from a ride mix) and the
+  no_vocals stem's transcript has fewer total words than the
+  vocals stem's.
+
+Sealed: Wodehaus, 2026-10-12 (before hva/mishear.py, hvp/ocr.py,
+or scripts/stem_streams.py were written, and before any Phase 5
+demonstration or validation run).
+
+### Phase 5 scoring (appended 2026-10-12, after the runs)
+
+_(filled in after the demonstration/validation runs, per house
+rule — the predictions above are not edited.)_
