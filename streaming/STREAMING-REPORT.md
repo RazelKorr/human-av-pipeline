@@ -1266,3 +1266,46 @@ Added 2026-10-12 from the run artifacts in `output/pink-panther-cato-attacks/`
   `audio_events.json`, `beat-map.md`, `transcript.json`, and a
   full-house `review.md` in protocol format (including a filed
   protocol-deviation note).
+
+## Binding baseline instrumentation (2026-10-12)
+
+Phase 2 of the post-audit improvements: the binding output now
+carries its own chance baseline instead of leaving the arithmetic
+to the reviews. `streaming/bind_av.py` was extended additively
+(the matcher and every original field are unchanged; run_stream
+now passes the processed duration): `av_binding.json` gains
+`bound_rate`, `chance_rate_poisson` with its inputs
+(`chance_inputs`: n_visual, duration, window, lambda), tight-window
+bound counts/rates at ±50 ms and ±100 ms with their own chance
+rates, and a `dt_summary` (|dt| histogram over 0–25/25–50/50–100/
+100–250 ms bins plus signed asymmetry). The estimator is the one
+the addenda above used by hand — Poisson: 1 − exp(−λ_v · 2W) with
+λ_v = n_visual / duration — and it reproduces the hand values
+exactly (FF3 39.7%, Dr Tran ~0.50). Unit tests in
+`tests/test_binding_baseline.py` pin the estimator against those
+hand baselines and check synthetic Poisson/clustered streams.
+
+Backfilled sidecars (`scripts/binding_baseline.py` writes
+`av_binding_baseline.json` alongside each run; originals untouched)
+for the four canonical runs — bound vs chance (±250 ms), and the
+|dt| ≤ 50 ms fraction of bound pairs:
+
+| Run | Bound | Chance | Excess | |dt|≤50 ms frac |
+|---|---|---|---|---|
+| FF3 1080p | 35.9% | 39.7% | −3.8 | 40.6% |
+| Star Tours AV | 38.2% | 45.6% | −7.4 | 46.2% |
+| Dr Tran ep4 | 50.7% | 49.8% | +0.9 | 38.3% |
+| Pink Panther | 52.4% | 47.8% | +4.6 | 31.5% |
+
+Two reconciliation notes. (1) This report's earlier phrasing
+"~39 pairs within 50 ms" (Dr Tran) and "~159 zero-dt pairs" (FF3)
+both name the **zero-dt bin**: the sidecar histograms count
+exactly 39 and 159 pairs at |dt| < 25 ms. Under a true
+|dt| ≤ 50 ms definition Dr Tran has 114 tight pairs — the counts
+were right, the phrase was loose, and the histogram now makes the
+distinction visible. (2) dt is quantized to the 50 ms moment grid
+in every run (the 25–50 ms histogram bin is empty everywhere;
+pairs sit at 0/±50/±100…), and nearest-neighbor matching
+concentrates tight fractions above the naive window-ratio
+expectation — read tight fractions against the tight windows'
+own chance rates, which the output now ships.
