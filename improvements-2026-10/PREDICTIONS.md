@@ -145,6 +145,109 @@ at 100 ms).
 Sealed: Wodehaus, 2026-10-12 (before any Phase 3 code was written
 or any validation run made).
 
+### Phase 3 scoring (appended 2026-10-12, after validation)
+
+All media runs used the flagship settings (640×360, motion-weight
+1.0, 50 ms moments) with audio off; pursuit and clock behavior do
+not depend on the audio path. The FF3 segment was re-encoded from
+`ff3_full_hd.mp4` (1200–1500 s, `input/ff3_seg_1200_1500.mp4`).
+
+**Item 8 — residual pursuit: 4/5 hit, default flipped to
+residual.**
+- P8.1 **HIT** — segment under legacy: 159 pursuits (pred ≥150),
+  100% of durations ≤ 0.41 s (pred ≥98%). The disease reproduces
+  on the re-encoded segment (the original run's window count was
+  174; the segment is a re-encode, not the identical frames).
+- P8.2 **MISS** — segment under residual: **41 pursuits = 25.8%**
+  of legacy, against the sealed ≤15%. The collapse is large
+  (−74%) but short of the sealed bar. The survivors are not the
+  translation disease — phase correlation cancels translation
+  only; camera rotation/zoom and genuinely local movers leave
+  residual motion by definition. (Cross-check under residual +
+  adaptive clock: 16 pursuits, 10.1% — inside the sealed band,
+  but that is not the comparison that was sealed, and it is not
+  counted as the hit.)
+- P8.3 **HIT** — Star Tours under residual: 120 pursuits (band
+  90–230), 45.1 s total (pred ≥30 s; legacy 161 / 60.2 s).
+- P8.4 **HIT** — Dr Tran ep4 under residual: 49 pursuits (pred
+  ≤76; legacy 51), 100% of durations ≤ 0.41 s (pred ≥70%). The
+  starved regime is unchanged, as sealed.
+- P8.5 **HIT** — unit level: uniform translating texture gives 0
+  residual pursuits vs ≥3 legacy (observed 0 vs 4); local mover
+  pursued in both modes on static backgrounds (uniform and
+  textured); mover on a translating background is pursued under
+  residual with the mover's direction, not the flow's.
+- Disposition: the flip to `pursuit_mode="residual"` as the
+  driver default was made despite the P8.2 miss — the mechanism
+  is exact where it is defined (translation), both preservation
+  regimes held, and the sealed threshold was a round number the
+  real footage's rotational content does not respect. Recorded
+  here so the judgment call is visible, not laundered.
+
+**Item 10 — adaptive saccade clock: 2/3 hit, default stays
+fixed.**
+- P10.1 **MISS** — Pink Panther under the adaptive clock:
+  bedroom 4.04/s (pred ≤2.8), brawl 3.99/s (pred ≥4.0, a
+  rounding-distance hit on its own), divergence 0.05/s (sealed
+  hit bar ≥0.8). Two measured causes, both on me: (1) the
+  activity statistic saturates — whole-frame motion means are
+  asleep 0.0130, sneak 0.0210, brawl 0.0258, and everything
+  above ACT_REF×1.6 (= 0.016) clips to the same busy factor, so
+  the bedroom (whose back half is 15 s of continuous sneaking —
+  the beat map said "stealthy, coiled movement" and I sealed a
+  "quiet bedroom" prediction anyway) and the brawl land on the
+  same interval; (2) the clip's total motion-mean dynamic range
+  is only ~2.5×, narrower than the design assumed. The clock
+  did modulate where the signal separated: the late segment
+  (motion mean 0.0105) slowed to 3.09/s vs 3.41/s fixed. Unit
+  level the mechanism is exact (dark-static 1.43/s vs
+  bright-busy 5.0/s, bounds held, fixed-clock control flat).
+- P10.2 **HIT** — fixed-clock control under identical motion-on
+  settings: bedroom 3.44/s, brawl 3.43/s, divergence 0.01
+  (pred: both 3.2–3.7, divergence ≤0.3).
+- P10.3 **HIT** — FF3 segment under the adaptive clock: overall
+  3.15/s (band 2.0–3.6); 60 s-bin rates 2.83/3.00/2.93/3.12/3.85,
+  spread 1.02 (pred ≥0.35 and ≤1.2; legacy spread 0.20).
+- Disposition: `saccade_clock` ships opt-in, default "fixed" —
+  the flip condition was the headline divergence and it missed.
+  The follow-up the data points to (a peak/top-decile motion
+  statistic instead of the whole-frame mean, plus a wider busy
+  range) is a NEW experiment needing its own sealed predictions,
+  not a re-roll of this one.
+
+**Item 13 — causal L2 gate: 3/4 hit, causal is the default.**
+(Validation: `scripts/l2_gate_compare.py` on Dr Tran ep4 inputs,
+4,361 moments; also `scripts/couple_av.py` end-to-end on its
+native Star Tours inputs: causal 41 captures / 66 switches vs
+legacy 38 / 68 — same family, no breakage.)
+- P13.1 **HIT** — event-label diffs 624 moments = 14.31% (sealed
+  band 1–25%). The wider trace divergence including cf_bin is
+  39.99% — the attended-band trajectory cascades from event
+  diffs; the sealed wording was event labels and is scored as
+  written.
+- P13.2 **MISS** — only 21.6% of event-differing moments have
+  |Δshaped| ≥ 0.05 (sealed ≥60%). Cause: state cascade — one
+  flipped decision changes cf/habituation/IOR for later moments,
+  whose events then differ where the two gates agree exactly;
+  and small gate deltas (0.01–0.05) flip borderline captures, a
+  channel my "diffs live where the gate moved a lot" model
+  underweighted. The gate's own causality is exact (P13.4);
+  this prediction was about trace geography and it was wrong.
+- P13.3 **HIT** — captures 212 legacy → 196 causal = −7.5%
+  (sealed ±25%).
+- P13.4 **HIT** — unit level: causal traces over a shared prefix
+  are bit-identical under a late appended transient (both the
+  shaped series and full AuditoryAttention traces); the legacy
+  leak is pinned by a characterization test that must keep
+  passing while legacy mode exists.
+
+Suite after Phase 3: **282 passed, 1 warning, exit 0** (full
+run captured to file and read from the file, per the house rule
+on unreliable background digests; 267 at Phase 2 + 15 new tests:
+7 pursuit, 3 clock, 5 gate). One pre-existing test was pinned to
+`pursuit_mode="legacy"` explicitly when the default flipped —
+its subject is the pursuit mechanism as originally validated.
+
 ### Phase 2 scoring (appended 2026-10-12, after the backfill)
 
 Chance rates: **4/4 exact** — FF3 39.7 (pred 39.7), Star Tours

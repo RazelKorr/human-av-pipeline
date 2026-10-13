@@ -1309,3 +1309,97 @@ pairs sit at 0/±50/±100…), and nearest-neighbor matching
 concentrates tight fractions above the naive window-ratio
 expectation — read tight fractions against the tight windows'
 own chance rates, which the output now ships.
+
+## Phase 3 pathways: residual pursuit, adaptive clock, causal L2 gate (2026-10-12)
+
+Audit items 8, 10, 13. Predictions were sealed before any code
+was written (`improvements-2026-10/PREDICTIONS.md`, Phase 3
+section, commit 57b3d06) and are scored there, misses included:
+item 8 went 4/5, item 10 2/3, item 13 3/4. All validation runs
+used the flagship settings (640×360, motion-weight 1.0, 50 ms
+moments) with audio off. The FF3 validation segment is
+`input/ff3_seg_1200_1500.mp4`, re-encoded from the 1080p source.
+
+**Item 8 — pursuit requires residual motion (now the default).**
+`MotionChannel(residual_mode=True)` estimates the global
+translation per frame (windowed phase correlation, subpixel by
+peak-neighborhood centroid — parabolic refinement measured
+biased on resampled content, 2.10/3.00 px for a true 2.66 px
+shift, and was replaced) and differences against the
+Fourier-shifted previous frame; the compensated diff then goes
+through the same local-coherence gate as always. Two guards keep
+the estimate honest: compensation applies only on a decisive
+correlation peak (`PC_CONF_MIN`), and only when at least 3% of
+the prev frame carries structure — below that, "global flow" is
+unidentifiable and the one moving object would cancel itself
+(this exact failure was caught by a unit test mid-build). The
+driver exposes `pursuit_mode: legacy|residual`
+(`run_stream --pursuit-mode`); residual is the default.
+
+Validation (pursuits; legacy segment count re-measured at 159,
+100% of durations ≤ 0.41 s — the disease on the re-encode):
+
+| Run | Legacy | Residual |
+|---|---|---|
+| FF3 segment 1200–1500 s | 159 | **41** (−74%) |
+| Star Tours full | 161 (60.2 s) | **120** (45.1 s) |
+| Dr Tran ep4 full | 51 | **49** |
+
+The sealed bar for the FF3 segment was ≤15% of legacy (≤26);
+41 is 25.8% — a scored miss, recorded in PREDICTIONS.md. What
+survives compensation is rotation/zoom and genuinely local
+motion, which translation-only compensation cannot and should
+not cancel. Unit tests (synthetic): pure egomotion → 0 residual
+pursuits vs 4 legacy; movers on static (uniform and textured)
+and moving backgrounds are pursued in residual mode, tracking
+the mover's direction against the flow.
+
+**Item 10 — content-sensitive saccade clock (shipped, opt-in).**
+`saccade_clock: fixed|adaptive` (`run_stream --saccade-clock`).
+Adaptive modulates the decision interval by the batch path's
+`darkness_gain` (reused, not re-derived) and a causal activity
+EMA — magno motion mean when the channel is on, transient mean
+otherwise — clamped to an effective 1.5–5.0/s. Its headline
+prediction missed, and the default stays **fixed**: Pink
+Panther adaptive gave bedroom 4.04/s vs brawl 3.99/s
+(divergence 0.05; sealed ≥0.8 with bedroom ≤2.8), because the
+clip's whole-frame motion means (asleep 0.0130 / sneak 0.0210 /
+brawl 0.0258) saturate the busy clip and the "bedroom" segment
+is half sneaking. The control behaved exactly as sealed (fixed:
+3.44 vs 3.43), the clock did slow the genuinely quiet late
+segment (3.09 vs 3.41/s), the FF3 segment's bin spread widened
+as predicted (1.02 vs legacy 0.20, overall 3.15/s in-band), and
+unit regimes separate cleanly (dark-static 1.43/s, bright-busy
+5.0/s). The pointed follow-up — a top-decile motion statistic
+instead of the whole-frame mean — is a new experiment, not a
+re-roll.
+
+**Item 13 — causal L2 gate (now the default).** The vis_boost
+reshape in `hva/attention.py` (consumed by `couple_av.py` pass
+3) no longer takes the 75th percentile over the whole sequence.
+`shaped_vis_boost(vb, gate_mode)`: "causal" uses a trailing
+300-moment window over strictly past moments, with no boost
+until 30 past moments exist; "legacy" keeps the full-sequence
+percentile for A/B, and `couple_av.py --gate-mode` selects.
+Unit tests prove prefix invariance exactly (shaped series and
+full attention traces bit-identical when a huge transient is
+appended late) and pin the legacy leak as a characterization.
+A/B on Dr Tran ep4 L2 inputs (`scripts/l2_gate_compare.py`,
+4,361 moments): event labels differ on 14.31% of moments,
+captures 212 → 196 (−7.5%), switches 515 → 503; `couple_av.py`
+on its native inputs runs clean under both modes (41/66 causal
+vs 38/68 legacy captures/switches). One scored miss: only
+21.6% of differing moments sit where the gate value moved by
+≥0.05 (sealed ≥60%) — trace divergence is dominated by state
+cascade from a few flipped decisions, not by direct gate
+disagreement.
+
+**Suite:** **282 passed, 1 warning, exit 0** — full run
+captured to file and read from the file (267 at Phase 2 + 15
+new tests: 7 pursuit, 3 clock, 5 gate). The default flip for
+pursuit_mode cost exactly one pre-existing test failure on the
+first post-flip run — `test_driver_pursues_constant_velocity_
+target`, which pinned the pursuit mechanism under what was then
+the default — now pinned to `pursuit_mode="legacy"` explicitly,
+with the residual mode's mover behavior covered by its own
+tests.
