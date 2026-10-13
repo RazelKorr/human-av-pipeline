@@ -529,5 +529,119 @@ demonstration or validation run).
 
 ### Phase 5 scoring (appended 2026-10-12, after the runs)
 
-_(filled in after the demonstration/validation runs, per house
-rule — the predictions above are not edited.)_
+**Item 15 — mishearing model: 2 hit, 1 hit-as-limitation,
+1 vacuous.**
+Demo decode note, on record first: the stored phase-1 record
+was made with VAD **off**. Re-transcribing
+`output/ff3_hd_av/onset_1649.7s.wav` with transcribe_audio
+defaults (VAD on) reads a *different* hallucination — "We're in
+silence!" (lp −0.911) — and shatters the tail into 22
+micro-segments; with vad=False the decode reproduces the stored
+record essentially exactly ("We're in Marvel!" ×2, "Get away!",
+lp −0.875 vs stored −0.877, word probs present). The demo of
+record uses the vad=False decode
+(`output/ff3_hd_av/mishear_demo_1649.json`). The instability is
+itself a finding: the base tier's hallucination on this window
+is configuration-sensitive; only its low confidence is stable.
+- **P15.1 HIT** — "We're in Marvel!" segments present at
+  avg_logprob **−0.875** (< −0.7 sealed).
+- **P15.2 HIT** — "Marvel" word prob **0.091 / 0.213**
+  (< 0.6 sealed); exact-key alternatives exist: **memorable**
+  (top, score 0.72 — the frequency prior outranks the more
+  obvious candidate), **marble** (0.67), maravil (0.54); near
+  tier: probably, travel.
+- **P15.3 HIT (the limitation, as sealed)** — no modeled
+  alternative, for any word in the window, recovers the medium
+  tier's resolution. The model offers lexical neighbors
+  (memorable / marble / were / war / jet for "Get"); the actual
+  sound was non-lexical screaming the medium tier rendered
+  "BLEH" / "NOOOO". The model annotates doubt; it does not and
+  cannot correct the hallucination. Confirmed by construction
+  and by demonstration.
+- **P15.4 VACUOUS in the demo** — all 3 segments (and all 22 in
+  the VAD decode) sit below −0.8; no ≥threshold segment exists
+  to score. The gate is pinned unconditionally by unit tests
+  (high-confidence segment → zero mishearings; no-logprob
+  segment → never modeled; verbatim byte-identical, input
+  unmutated — tests/test_mishear.py, 8/8).
+- Noise on record: the tokenizer-vocabulary candidate list
+  includes sub-word BPE fragments ("ine", "ini", "wor",
+  "maravil"). They are labeled model output and ranked by the
+  same score; a wordlist-grade filter is future work, not
+  silently applied.
+
+**Item 17 — OCR: 1 hit, 2 miss. The module is a seam, not yet
+a capability.**
+- **P17.1 HIT** — exact match at 48/32/24 px (FUEL / DANGER /
+  EXIT 7), and in fact at all six sizes.
+- **P17.2 MISS** — exact match did NOT fail at ≤14 px: 18
+  (HANGAR), 14 (BAY 12), and 10 px (FUEL) all read exactly.
+  Unscored extension: at 8 px and below the engine reads
+  nothing at all — the sterile-fixture cliff sits between 10
+  and 8 px, far under the sealed band. Cause: the fixture is
+  sterile — vector-crisp bold text, pure contrast, no noise,
+  perspective, or blur — and tesseract internally upscales.
+  This bounds the engine's sterile regime only; it says
+  little about signage in footage, as P17.3 shows.
+- **P17.3 MISS** — on the sealed frames, no real sign was read.
+  Bay-signage frames (t = 30–32 s) yield garbage tokens only
+  ('am', 'rr', '"aa', 'Lille' at conf 31–61); the closing
+  frames I chose (262–268 s) are near-black (mean luma
+  0.013 → 0.000 — the film is effectively over; the
+  FUEL/HAZARDOUS near-miss sits at ~258–260 s, my timestamp
+  error). Extension at 258–260 s (luma 0.124): texture
+  pareidolia only, including a conf-**80** 'hy' on machinery —
+  engine confidence on texture garbage can be high, so the
+  confidence floor does not make texture reads trustworthy.
+  Disposition: diegetic signage in this footage stays
+  human-read per REVIEW-PROTOCOL §6; hvp/ocr.py is the seam a
+  future engine (or preprocessing) plugs into, with the
+  synthetic validation (tests/test_ocr.py 4/4;
+  output/ocr_synthetic_validation.json) as its sterile-regime
+  baseline.
+
+**Item 14 — stem streams: 4/4 by the sealed bars, with the
+leakage caveats on record.**
+Ground truth (vocals excerpt 35–55 s, pre-mix): "Alright, girls
+ready? Ready? Ready? We're on the right! I meant to do that. A
+little shortcut." (17 tokens).
+- **P14.1 HIT** — vocals-stem transcript token containment
+  **11/17 = 0.647** (sealed ≥ 0.6). Quality note: the stem
+  transcript is 13 micro-segments and the opening line is
+  garbled ("Some horrible drugs" for "Alright, girls ready?");
+  the famous back half survives nearly intact ("…meant | to do |
+  that | A | little | shortcut"). The bar was met by token
+  presence, not by readable prose.
+- **P14.2 HIT** — no_vocals CLAP aggregate top-1 is
+  **"singing" 0.1485** (music-like per the sealed definition;
+  "music" itself 4th at 0.1227), and its transcript is **empty**
+  (0 segments). Margin honesty: "silence" is a close second
+  (0.1395) — CLAP barely separates a pure tone sequence; the
+  hit is real and thin.
+- **P14.3 HIT by the letter, weak in spirit** — mix 21 onsets;
+  vocals 19, no_vocals 19, both < 21 as sealed. But the stems
+  leak: tone-burst times (9.25, 16.35) appear in the VOCALS
+  stem's onsets and speech times throughout the no_vocals
+  stem's — each stem approximates the union minus a little,
+  not a clean object stream. Counterpoint from the real demo:
+  on Star Tours 62 s the stems EXCEED the mix (68 / 60 vs 54
+  onsets) — separation artifacts manufacture transients, so
+  per-stem onset sparsity does not hold in the wild.
+- **P14.4 HIT** — Star Tours vocals stem: 44 words across 9
+  segments, all avg_logprob ≥ −0.8 (real dialogue recovered:
+  "I see they're loading our Navigator R2-D2 and then we'll be
+  on our way." / "I meant to do that" / "A little shortcut");
+  no_vocals transcript **0 words** < 44; its CLAP top-1 is
+  "music" 0.2285 (siren close behind at 0.2244).
+- Cross-cutting data-quality note: segment avg_logprob within
+  a stem run is near-uniform (synth vocals: all 13 segments
+  −0.554; ST vocals: 8 of 9 at −0.431; the item-15 VAD decode:
+  all 22 at −0.911). Whatever this faster-whisper version is
+  aggregating, per-segment confidence discrimination in these
+  outputs is coarse; the garbage-flag heuristic (≥half of
+  segments < −0.8) inherits that coarseness. Observed in the
+  artifacts as written; flagged, not diagnosed.
+
+Suite after Phase 5: **301 passed, 1 warning, exit 0** (full
+run captured to file and read from the file; 286 at Phase 4 +
+15 new: 8 mishear, 4 OCR, 3 stem-stream unit tests).
