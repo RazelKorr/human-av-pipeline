@@ -395,7 +395,22 @@ run captured to file and read from the file; 282 at Phase 3 +
 4 new regime tests in `tests/test_fixture_regimes.py`, which
 pass standalone in 23 s). Fixture table committed at
 `tests/fixtures/FIXTURES.md` with all values measured for this
-phase. What the corpus still lacks is listed there: a
+phase.
+
+Correction to the fixture table (appended 2026-10-12): the
+proxy column as first committed came from an unreliable
+automated digest of the measurement run — the same failure
+mode as Lane 2's corrected process note, fourth occurrence.
+Re-measured deterministically (twice, identical): Star Tours
+0.0885, Pink Panther 0.1024, FF3 0.1733, Dr Tran ep4 0.0657,
+quiet room 0.0008; ST/ep4 separation 1.35× (not 1.83×); the
+digest's "container durations are unreliable" claim was also
+false (ffprobe format and stream durations agree). Nothing in
+the Phase 4 scoring above depends on the proxy values — the
+predictions were scored on run artifacts read directly — but
+two FIXTURES.md narrative claims built on the digest numbers
+(the ep4/FF3 proxy "side by side" reading) have been
+rewritten; see the correction note in FIXTURES.md. What the corpus still lacks is listed there: a
 music-dominant row, crossed dark-busy / bright-silent fixtures
 (the quiet room couples dark + silent, so the darkness gate
 and the dwell rule are exercised together, never separately),

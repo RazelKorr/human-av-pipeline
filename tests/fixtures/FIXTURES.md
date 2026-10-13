@@ -13,18 +13,16 @@ themselves.
 
 ## The regimes
 
-Durations are VIDEO-STREAM durations (`ffprobe -select_streams
-v:0`): container format duration is unreliable on these files
-(ep4's format header says 271.7 s against a 436.1 s video
-stream; Pink Panther's says 546.4 s against 200.1 s).
+Durations are ffprobe durations (format and video-stream
+values agree to <0.1 s on every file in the table).
 
 | Fixture | Source (`input/`) | Regime | Duration | Motion energy (run) | Motion proxy (test) | Onset density (run) | Run of record |
 |---|---|---|---|---|---|---|---|
-| Star Tours | `star_tours_1_ride_film.mp4` | motion-rich | 269.0 s | 0.0227 | 0.0758 | 0.88/s (238) | `output/st_stream_av_full/` |
-| Pink Panther / Cato | `sensorium-yt-Tu1RZaFnkKs.mp4` | mixed quiet/action | 200.1 s | — (run had motion OFF) | 0.0665 | 0.85/s (170) | `output/pink-panther-cato-attacks/` |
-| FF3 1080p | `ff3_full_hd.mp4` | egomotion | 2701.0 s | 0.0186 | 0.0425 | 1.24/s (3362) | `output/ff3_hd_av/` |
-| Dr Tran ep4 | `drtran_ep4_toy_cack.mp4` | dialogue | 436.1 s | 0.0125 | 0.0414 | 1.35/s (588) | `output/drtran_ep4_av/` |
-| Quiet room | `quiet_room_60s.mp4` | quiet / near-silent | 60.0 s | 0.000000 | 0.0012 | 0.017/s (1) | `output/quiet_room_60s/` (+ `_adaptive`) |
+| Star Tours | `star_tours_1_ride_film.mp4` | motion-rich | 269.0 s | 0.0227 | 0.0885 | 0.88/s (238) | `output/st_stream_av_full/` |
+| Pink Panther / Cato | `sensorium-yt-Tu1RZaFnkKs.mp4` | mixed quiet/action | 200.1 s | — (run had motion OFF) | 0.1024 | 0.85/s (170) | `output/pink-panther-cato-attacks/` |
+| FF3 1080p | `ff3_full_hd.mp4` | egomotion | 2701.0 s | 0.0186 | 0.1733 | 1.24/s (3362) | `output/ff3_hd_av/` |
+| Dr Tran ep4 | `drtran_ep4_toy_cack.mp4` | dialogue | 436.1 s | 0.0125 | 0.0657 | 1.35/s (588) | `output/drtran_ep4_av/` |
+| Quiet room | `quiet_room_60s.mp4` | quiet / near-silent | 60.0 s | 0.000000 | 0.0008 | 0.017/s (1) | `output/quiet_room_60s/` (+ `_adaptive`) |
 
 How each measured column is produced (measured 2026-10-12 for
 this table, not transcribed from prose):
@@ -42,20 +40,28 @@ this table, not transcribed from prose):
 
 ## What the table teaches
 
-- **Frame-diff energy does not separate dialogue from
-  egomotion.** Dr Tran ep4 and FF3 sit side by side on both
-  motion columns (0.0125/0.0186 run; 0.041/0.043 proxy) while
-  their pursuit behavior is opposite: ep4 starved (51 legacy
-  pursuits), FF3 egomotion-locked (1,127 legacy pursuits, 100%
-  minimum-duration; the disease Phase 3's residual mode treats).
-  Regime identity lives in the pursuit/binding outcomes, not in
-  raw energy — the table carries both so neither can drift
-  unnoticed.
+- **The two motion columns measure different things, and the
+  pursuit outcomes separate what neither can.** On the
+  pipeline's full-run motion energy, dialogue and egomotion sit
+  close (ep4 0.0125, FF3 0.0186); on the first-120 s proxy they
+  do not (0.0657 vs 0.1733 — FF3's opening minutes are far
+  busier than its whole-film average, and the proxy samples
+  only the opening, at 320×180 against the pipeline's 96×54
+  thumbnail). What actually separates the regimes is pursuit
+  behavior: ep4 starved (51 legacy pursuits), FF3
+  egomotion-locked (1,127 legacy pursuits, 100%
+  minimum-duration; the disease Phase 3's residual mode
+  treats). Regime identity lives in the pursuit/binding
+  outcomes, not in raw energy — the table carries both motion
+  columns and the outcomes so none can drift unnoticed. The
+  proxy's only jobs are the Star Tours > ep4 ordering and the
+  quiet band; do not read it as parity with the pipeline
+  metric.
 - **Dialogue is onset-dense.** ep4 has the corpus's highest
   onset density (1.35/s — speech) and its lowest motion energy.
   A fixture set chosen by "interesting audio" alone is how the
   motion pathway starved in the first place.
-- **Pink Panther's proxy (0.0665) overstates its quiet half:**
+- **Pink Panther's proxy (0.1024) overstates its quiet half:**
   the first 120 s contain the brawl (25–130 s per its beat map).
   Its run of record also predates the motion channel being
   switched on for it — the one corpus row with no run motion
@@ -112,10 +118,26 @@ WAVs also live in `input/` but are batch-era alternates, not in
 the streaming regime rotation; ep4 is the dialogue
 representative. `input/ff3_seg_1200_1500.mp4` is a 300 s
 segment cut of the FF3 fixture for Phase 3 validation runs
-(proxy on the segment: 0.0699). The `owl-test*` / `agent-test`
+(proxy on the segment: 0.1269). The `owl-test*` / `agent-test`
 clips are scratch media for recognition/conversation
 experiments, not regime fixtures. The quiet room is the only
 fixture with a generator: `python3 scripts/make_fixtures.py`.
+
+## Correction (2026-10-12, same day)
+
+The first version of this table carried proxy values (and a
+"container duration is unreliable" footnote) sourced from an
+unreliable automated digest of the measurement run — the
+house failure mode the audit's Lane 2 process note records.
+The measurement was re-run deterministically (twice, identical
+output, via `motion_proxy()` itself) and every proxy value
+above is the re-measured one: Star Tours 0.0885, Pink Panther
+0.1024, FF3 0.1733, Dr Tran ep4 0.0657, quiet room 0.0008;
+the ST/ep4 separation is 1.35×, not the 1.83× the digest
+claimed; and ffprobe format durations agree with stream
+durations on all five files (ep4: 436.1 s both ways). The
+run-artifact columns (motion energy, onset density) were read
+from the run files directly and were never in question.
 
 ## Still missing (as of Phase 4)
 

@@ -81,7 +81,7 @@ def test_motion_regime_ordering_star_tours_above_dialogue():
         "have swapped; see tests/fixtures/FIXTURES.md")
     assert st >= 1.25 * ep4, (
         f"regime separation too thin: Star Tours {st:.5f} vs Dr "
-        f"Tran ep4 {ep4:.5f} (measured 1.83x at systematization, "
+        f"Tran ep4 {ep4:.5f} (measured 1.35x at systematization, "
         "2026-10-12); a thin margin means fixture choice can "
         "again hide the motion pathway")
 
@@ -94,7 +94,7 @@ def test_quiet_fixture_motion_in_quiet_band():
     q = motion_proxy(QUIET_ROOM, seconds=60.0)
     assert q < 0.005, (
         f"quiet fixture motion proxy {q:.5f} outside the quiet "
-        "band (< 0.005; measured 0.00122 at generation) -- the "
+        "band (< 0.005; measured 0.00079 at generation) -- the "
         "fixture is no longer quiet; regenerate or re-seal")
 
 
