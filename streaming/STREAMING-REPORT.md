@@ -1,9 +1,10 @@
 # Sensorium streaming harness — current state
 
-*Last updated 2026-10-03 (PDT). The full dated build diary — the original
-report plus all seven addenda, nothing dropped — lives in the **Changelog**
-at the end. What follows is the current state, with every number traceable
-to the changelog entry that produced it.*
+*Last updated 2026-10-06 (PDT). The full dated build diary — the original
+report plus every addendum since (thirteen dated sections through the
+2026-10-06 Pink Panther watch), nothing dropped — lives in the
+**Changelog** at the end. What follows is the current state, with every
+number traceable to the changelog entry that produced it.*
 
 **Status:** pre-hardware, test-fixture only. No live sensors touched.
 
@@ -1239,3 +1240,29 @@ Mykal's favorite of the three Found Footage films, watched as the full eep-time 
 
 ### Verdict
 The pipeline's FF3 is a film about exertion: 45 minutes of a body moving through a hostile space, heard more than seen. The sealed predictions broke 10/12 because the mental model was "empty hum with rare events" and the reality is "dense human noise over machine drone" — the best possible outcome for the regime. Nothing about the Star Tours or Dr Tran findings needed retracting; the binding coincidence result replicated for the third time (below chance here).
+
+## Pink Panther "Cato attacks" — full Sensorium watch (2026-10-06)
+
+Added 2026-10-12 from the run artifacts in `output/pink-panther-cato-attacks/`
+(this run was missing from the changelog; numbers below are read from
+`run_report.json` / `av_binding.json`, not from the review).
+
+- Source: `input/sensorium-yt-Tu1RZaFnkKs.mp4`, 200.1 s processed at the
+  streaming grain (50 ms moments, 20 Hz): **4,001 moments**, wall clock
+  148.6 s → **1.35× realtime** (the first flagship-class run to process
+  faster than realtime).
+- Vision: **685 saccades** (~3.4/s). **Motion channel OFF** —
+  `motion_weight: null`, `pursuit: false`, 0 pursuits. This is the only
+  flagship-class run without the magno path, which makes it the
+  control case for the pursuit findings in the FF3/Dr Tran addenda:
+  everything below was bound without any motion channel at all.
+- Audio/binding: 170 audio onsets, 260 visual transients, **89 bound
+  (52.4%)** at the ±250 ms coincidence window — the highest raw bound
+  rate of any flagship-class run to date (FF3 35.9%, Star Tours 38.2%,
+  Dr Tran ep4 50.7%). Per the standing caveat in those addenda this is
+  a coincidence rate, not a causal-binding measure; no chance baseline
+  was computed for this run.
+- Deliverables in the run dir: `run_report.json`, `av_binding.json`,
+  `audio_events.json`, `beat-map.md`, `transcript.json`, and a
+  full-house `review.md` in protocol format (including a filed
+  protocol-deviation note).
