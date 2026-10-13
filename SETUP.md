@@ -79,7 +79,7 @@ Place under `models/` at the repo root:
 | Directory / file | Used by | Notes |
 |---|---|---|
 | `faster-whisper-base/` | `hva/transcribe.py` (MODEL_DIR) | Needs `vocabulary.json` + `preprocessor_config.json` (feature_size 80) for ctranslate2 ≥4 — both present in the working copy. |
-| `faster-whisper-medium/` | `hva/interpret.py` two-tier escalation | Same `vocabulary.json` / `preprocessor_config.json` requirement; mirrored from base (2026-10-12). |
+| `faster-whisper-medium/` | `hva/interpret.py` two-tier escalation | Same `vocabulary.json` / `preprocessor_config.json` requirement; fixed 2026-10-12. `preprocessor_config.json` copied from base, but `vocabulary.json` was generated from medium's **own** `vocabulary.txt` — do NOT copy base's list: base carries a newer tokenizer revision (extra `<|yue|>` / `<|nospeech|>` tokens shift every id ≥ 50358). Verified by before/after medium transcription smoke test: identical segments and word probs. |
 | `laion-clap-630k-audioset-best.pt` | `hva/interpret.py` (CLAP labels) | ~1.9 GB single checkpoint file. |
 
 The faster-whisper dirs are local copies of the Systran repos with the
