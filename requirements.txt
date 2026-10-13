@@ -1,12 +1,40 @@
-numpy==1.26.4
-scipy==1.11.4
-matplotlib==3.6.3
+# Pinned to the versions the working .venv actually runs (verified
+# against `pip list` 2026-10-12). See SETUP.md for the full rebuild
+# recipe -- this file alone is not the whole story (torch CPU index,
+# system ffmpeg, models/, and the certifi CA step all live there).
+
+# Core numerics / imaging
+numpy==2.5.3
+scipy==1.18.1
+matplotlib==3.8.4
 Pillow==10.2.0
+
+# Speech transcription (faster-whisper / ctranslate2)
 faster-whisper==1.2.1
+av==19.0.0
+
+# Interpretation: CLAP zero-shot labels + music features
+laion-clap==1.1.7
+librosa==1.0.0
+soundfile==0.14.0
+torchlibrosa==0.1.0
+
+# Recognition (CLIP / OWL-ViT)
 transformers==5.17.0
 huggingface_hub==1.33.0
-# torch is required by the CLIP classifier but must come from the CPU
-# index on machines without CUDA (PyPI does not host +cpu builds):
+
+# Vocal separation for hva.transcribe --separate-vocals
+demucs==4.1.0
+
+# Media acquisition (pipeline fetch scripts)
+yt-dlp==2026.8.19
+
+# Tests
+pytest==9.1.1
+
+# torch is required by the CLIP classifier, CLAP, and demucs, but must
+# come from the CPU index on machines without CUDA (PyPI does not host
+# +cpu builds). Install it FIRST:
 #   pip install torch==2.14.0+cpu --index-url https://download.pytorch.org/whl/cpu
 # then: pip install -r requirements.txt
 torch==2.14.0
