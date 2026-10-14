@@ -213,12 +213,30 @@ def binding_summary(pairs, n_audio, n_visual, duration_s=None,
     }
 
 
+VISUAL_MAD_TO_SIGMA = 1.4826  # MAD -> sigma consistency constant
+# (Gaussian bulk) -- the same constant hva.online.MAD_TO_SIGMA
+# carries for the audio picker. Since 2026-10-14 (commission 2,
+# R1) visual_transients' k is in these units; before, its MAD was
+# unscaled and the k=4.0 bar sat at ~median + 2.7 sigma.
+
+
 def visual_transients(frame_energies, frame_times_ms, moment_ms=MOMENT_MS,
                       k=4.0):
     """frame_energies: per-frame energies (driver.energies);
     frame_times_ms: matching timestamps. Returns (t_s, strength)
     transient peaks on the moment grid: local maxima of the
-    per-moment max |energy diff|, thresholded at median + k*MAD.
+    per-moment max |energy diff|, thresholded at median + k*MAD,
+    with the MAD scaled by VISUAL_MAD_TO_SIGMA so k is in robust
+    sigmas.
+
+    The unscaled bar was indicted by a sealed synthetic fixture
+    (2026-10-14, commission 2 R1): on a stationary noisy energy
+    bed holding 10 planted transients it returned 41 picks --
+    31 false alarms, a fixed tail-exceedance count set by the
+    bed's duration, not by events (the PX.1 failure shape, one
+    channel over). Scaled: 11 picks, 10/10 planted, 1 false.
+    Transient counts from runs before this change are not
+    comparable to counts after it (same caveat class as PX.1).
     """
     e = np.asarray(frame_energies, dtype=np.float64)
     t = np.asarray(frame_times_ms, dtype=np.float64) / 1000.0
@@ -233,7 +251,7 @@ def visual_transients(frame_energies, frame_times_ms, moment_ms=MOMENT_MS,
     np.maximum.at(curve, idx, d)
     med = float(np.median(curve))
     mad = float(np.median(np.abs(curve - med))) + 1e-12
-    thr = med + k * mad
+    thr = med + k * VISUAL_MAD_TO_SIGMA * mad
     peaks = [i for i in range(n_mom)
              if curve[i] > thr
              and curve[i] >= curve[max(0, i - 2):i + 3].max()]

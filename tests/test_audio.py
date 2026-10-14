@@ -162,6 +162,34 @@ def test_visual_transients_and_bind():
     assert b2["unbound_audio"][0]["strength"] == 1.0
 
 
+def test_visual_transients_stationary_bed_r1():
+    # R1 (2026-10-14): a loud stationary energy bed must not
+    # manufacture transients. Construction mirrors the sealed
+    # fixture (improvements-2026-10/logs/wild-2026-10-14/
+    # r1_fixture.py): 120 s at 30 fps, smooth base + white noise
+    # sigma 0.05, 10 planted +1.0 transients. Under the pre-fix
+    # UNSCALED MAD bar this returned 41 picks / 31 false alarms;
+    # with VISUAL_MAD_TO_SIGMA applied it returns 11 / 1. If the
+    # constant is ever dropped, this test floods and fails.
+    rng = np.random.default_rng(20261014)
+    n = int(30.0 * 120.0)
+    t = np.arange(n) / 30.0
+    e = 1.0 + 0.1 * np.sin(2 * np.pi * t / 60.0)
+    e = e + rng.normal(0.0, 0.05, n)
+    planted = [7.5 + 11.0 * k for k in range(10)]
+    for tp in planted:
+        i = int(round(tp * 30.0))
+        e[i:i + 2] += 1.0
+    vt = visual_transients(e, t * 1000.0)
+    # classify in moment-index space (pick times are grid
+    # multiples; a +-0.05 s float tolerance straddles the edge)
+    found = sum(1 for (ts, _s) in vt
+                if any(abs(round(ts / 0.05) - round(tp / 0.05)) <= 1
+                       for tp in planted))
+    assert found == 10
+    assert len(vt) <= 13  # false alarms <= 3 (measured: 1)
+
+
 def test_decode_audio_track_length(tmp_path):
     # build a 2 s stereo 48 kHz test video with a tone
     vid = str(tmp_path / "tone.mp4")
