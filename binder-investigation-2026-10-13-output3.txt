@@ -1,0 +1,2 @@
+ff3_hd_av: max_matching=1239 rate=0.3685 greedy=1208 greedy_loss=31 (2.6%)
+st_stream_av_full: max_matching=92 rate=0.3866 greedy=91 greedy_loss=1 (1.1%)

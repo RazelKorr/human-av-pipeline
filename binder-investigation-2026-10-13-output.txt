@@ -1,0 +1,46 @@
+
+===== ff3_hd_av dur=2700.9983
+reconstructed nA=3362 (file 3362) nV=2735 (file 2735) bound_file=1208
+off-grid times: audio 0, visual 0
+greedy replication: n=1226 identical_pair_set=False
+reference bind() rerun: n_bound=1226 bound_rate=0.3647 identical=False
+ audio: n=3362 rate=1.2447/s IEI mean=0.803 sd=0.689 CV=0.858 median=0.550 min=0.250 max=7.90 | Fano10s=0.89 (windows=270, mean count=12.45, max=21, zero-windows=0)
+ audio: n=3362 rate=1.2447/s IEI mean=0.803 sd=0.689 CV=0.858 median=0.550 min=0.250 max=7.90 | Fano60s=2.05 (windows=45, mean count=74.71, max=97, zero-windows=0)
+ audio: frac IEI<=0.5s = 0.468; frac IEI<=0.25s = 0.099
+ visual: n=2735 rate=1.0126/s IEI mean=0.988 sd=1.856 CV=1.879 median=0.400 min=0.150 max=26.20 | Fano10s=5.30 (windows=270, mean count=10.13, max=33, zero-windows=12)
+ visual: n=2735 rate=1.0126/s IEI mean=0.988 sd=1.856 CV=1.879 median=0.400 min=0.150 max=26.20 | Fano60s=14.80 (windows=45, mean count=60.76, max=158, zero-windows=0)
+ visual: frac IEI<=0.5s = 0.612; frac IEI<=0.25s = 0.325
+ per-audio visual candidates in +-250ms: mean=0.553 frac audio with >=1 candidate=0.3923 (that rate x nA = 1319 audio) frac >=2=0.1380 frac >=3=0.0220
+ per-visual audio candidates: mean=0.679 frac visual contested (>=2 audio)=0.1108 frac visual with 0 audio=0.4325; visuals with >=1 audio=1552 (upper bound on pairs)
+ NULL wide bound rate: obs=0.3647 null mean=0.3600 sd=0.0068 p5=0.3489 p50=0.3598 p95=0.3709 min=0.3388 max=0.3766 obs_percentile=75.0
+ NULL tight |dt|<=50 rate: obs=0.1452 null mean=0.1452 sd=0.0053 p5=0.1368 p50=0.1452 p95=0.1538 min=0.1324 max=0.1621 obs_percentile=50.0
+ NULL dt=0 count: obs=158.0000 null mean=162.3100 sd=12.2669 p5=142.9500 p50=162.0000 p95=182.0500 min=134.0000 max=193.0000 obs_percentile=36.5
+ null shifts: 200, uniform [10s, dur_grid-10s], multiples of 50ms, circular modulo dur_grid=2701.0s, seed 20261013
+ SWEEP W=50ms: bound_rate=0.1514 poisson_chance=0.0963 excess=+0.0551 grid_chance=0.1409 excess_vs_grid=+0.0105
+ SWEEP W=100ms: bound_rate=0.2308 poisson_chance=0.1833 excess=+0.0475 grid_chance=0.2236 excess_vs_grid=+0.0072
+ SWEEP W=250ms: bound_rate=0.3647 poisson_chance=0.3973 excess=-0.0326 grid_chance=0.4270 excess_vs_grid=-0.0624
+ SWEEP W=500ms: bound_rate=0.4402 poisson_chance=0.6367 excess=-0.1965 grid_chance=0.6547 excess_vs_grid=-0.2144
+ SWEEP W=1000ms: bound_rate=0.5217 poisson_chance=0.8680 excess=-0.3463 grid_chance=0.8745 excess_vs_grid=-0.3528
+
+===== st_stream_av_full dur=269.033333
+reconstructed nA=238 (file 238) nV=328 (file 328) bound_file=91
+off-grid times: audio 0, visual 0
+greedy replication: n=91 identical_pair_set=False
+reference bind() rerun: n_bound=91 bound_rate=0.3824 identical=False
+ audio: n=238 rate=0.8846/s IEI mean=1.131 sd=1.128 CV=0.998 median=0.700 min=0.250 max=7.50 | Fano10s=1.08 (windows=26, mean count=8.50, max=16, zero-windows=0)
+ audio: n=238 rate=0.8846/s IEI mean=1.131 sd=1.128 CV=0.998 median=0.700 min=0.250 max=7.50 | Fano60s=0.67 (windows=4, mean count=50.50, max=56, zero-windows=0)
+ audio: frac IEI<=0.5s = 0.371; frac IEI<=0.25s = 0.072
+ visual: n=328 rate=1.2192/s IEI mean=0.809 sd=1.639 CV=2.026 median=0.350 min=0.150 max=16.85 | Fano10s=6.22 (windows=26, mean count=12.54, max=31, zero-windows=2)
+ visual: n=328 rate=1.2192/s IEI mean=0.809 sd=1.639 CV=2.026 median=0.350 min=0.150 max=16.85 | Fano60s=13.89 (windows=4, mean count=80.25, max=128, zero-windows=0)
+ visual: frac IEI<=0.5s = 0.661; frac IEI<=0.25s = 0.324
+ per-audio visual candidates in +-250ms: mean=0.559 frac audio with >=1 candidate=0.4034 (that rate x nA = 96 audio) frac >=2=0.1429 frac >=3=0.0126
+ per-visual audio candidates: mean=0.405 frac visual contested (>=2 audio)=0.0549 frac visual with 0 audio=0.6494; visuals with >=1 audio=115 (upper bound on pairs)
+ NULL wide bound rate: obs=0.3824 null mean=0.4387 sd=0.0328 p5=0.3863 p50=0.4370 p95=0.4876 min=0.3571 max=0.5126 obs_percentile=3.0
+ NULL tight |dt|<=50 rate: obs=0.1765 null mean=0.1756 sd=0.0249 p5=0.1387 p50=0.1723 p95=0.2185 min=0.1218 max=0.2563 obs_percentile=50.5
+ NULL dt=0 count: obs=14.0000 null mean=13.6050 sd=3.5921 p5=8.0000 p50=14.0000 p95=19.0500 min=4.0000 max=24.0000 obs_percentile=48.0
+ null shifts: 200, uniform [10s, dur_grid-10s], multiples of 50ms, circular modulo dur_grid=269.05s, seed 20261013
+ SWEEP W=50ms: bound_rate=0.1765 poisson_chance=0.1148 excess=+0.0617 grid_chance=0.1671 excess_vs_grid=+0.0093
+ SWEEP W=100ms: bound_rate=0.2437 poisson_chance=0.2164 excess=+0.0273 grid_chance=0.2627 excess_vs_grid=-0.0190
+ SWEEP W=250ms: bound_rate=0.3824 poisson_chance=0.4564 excess=-0.0741 grid_chance=0.4886 excess_vs_grid=-0.1062
+ SWEEP W=500ms: bound_rate=0.4748 poisson_chance=0.7045 excess=-0.2297 grid_chance=0.7220 excess_vs_grid=-0.2472
+ SWEEP W=1000ms: bound_rate=0.5504 poisson_chance=0.9127 excess=-0.3623 grid_chance=0.9179 excess_vs_grid=-0.3674

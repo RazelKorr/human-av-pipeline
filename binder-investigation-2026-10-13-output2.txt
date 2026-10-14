@@ -1,0 +1,27 @@
+
+===== ff3_hd_av: dust-faithful greedy n=1208 exact_vs_file=True
+ DUST-NULL wide rate: obs=0.3593 null mean=0.3554 sd=0.0064 p5=0.3447 p95=0.3656 obs_pct=74.0
+ DUST-NULL tight rate: obs=0.1457 null mean=0.1461 sd=0.0058 p5=0.1374 p95=0.1556 obs_pct=44.0
+ DUST-NULL dt0 count: obs=159.0000 null mean=164.9300 sd=12.4297 p5=143.0000 p95=184.0500 obs_pct=28.5
+ DUST-NULL mean|dt| ms: obs=108.7000 null mean=105.3969 sd=2.1416 p5=102.1154 p95=108.8947 obs_pct=94.0
+
+===== st_stream_av_full: dust-faithful greedy n=91 exact_vs_file=True
+ DUST-NULL wide rate: obs=0.3824 null mean=0.4341 sd=0.0331 p5=0.3782 p95=0.4832 obs_pct=6.5
+ DUST-NULL tight rate: obs=0.1765 null mean=0.1802 sd=0.0230 p5=0.1429 p95=0.2143 obs_pct=46.5
+ DUST-NULL dt0 count: obs=14.0000 null mean=14.4150 sd=3.7834 p5=9.0000 p95=21.0500 obs_pct=40.5
+ DUST-NULL mean|dt| ms: obs=103.3000 null mean=103.8038 sd=7.0856 p5=91.8053 p95=113.9850 obs_pct=49.0
+
+===== decomposition table (from artifacts)
+ FF3: nA=3362 nV=2735 lam_v=1.013 bound=0.3593 poisson=0.3973 atLeastOne=0.3923 exclusivity_loss=+0.0330 nonuniform_gap=-0.0049 gridChance=0.4270 tight=0.1457 tightPoisson=0.0963 tightGrid=0.1409 tightExcessVsGrid=+0.0048 segCorr10s=-0.001 tightFracOfBound=0.4056
+ StarTours: nA=238 nV=328 lam_v=1.219 bound=0.3824 poisson=0.4564 atLeastOne=0.4034 exclusivity_loss=+0.0210 nonuniform_gap=-0.0531 gridChance=0.4886 tight=0.1765 tightPoisson=0.1148 tightGrid=0.1671 tightExcessVsGrid=+0.0094 segCorr10s=-0.288 tightFracOfBound=0.4615
+ DrTran ep4: nA=588 nV=601 lam_v=1.378 bound=0.5068 poisson=0.4980 atLeastOne=0.5425 exclusivity_loss=+0.0357 nonuniform_gap=+0.0446 gridChance=0.5314 tight=0.1939 tightPoisson=0.1287 tightGrid=0.1868 tightExcessVsGrid=+0.0071 segCorr10s=+0.057 tightFracOfBound=0.3826
+ PinkPanther: nA=170 nV=260 lam_v=1.300 bound=0.5235 poisson=0.4778 atLeastOne=0.5765 exclusivity_loss=+0.0529 nonuniform_gap=+0.0986 gridChance=0.5107 tight=0.1647 tightPoisson=0.1219 tightGrid=0.1771 tightExcessVsGrid=-0.0124 segCorr10s=+0.456 tightFracOfBound=0.3146
+ YTPMV: nA=362 nV=534 lam_v=2.312 bound=0.7624 poisson=0.6853 atLeastOne=0.8011 exclusivity_loss=+0.0387 nonuniform_gap=+0.1158 gridChance=0.7196 tight=0.3840 tightPoisson=0.2064 tightGrid=0.2931 tightExcessVsGrid=+0.0909 segCorr10s=+0.562 tightFracOfBound=0.5036
+ dark_busy: nA=54 nV=56 lam_v=0.933 bound=0.5000 poisson=0.3729 atLeastOne=0.5741 exclusivity_loss=+0.0741 nonuniform_gap=+0.2012 gridChance=0.4015 tight=0.1852 tightPoisson=0.0891 tightGrid=0.1306 tightExcessVsGrid=+0.0546 segCorr10s=+0.578 tightFracOfBound=0.3704
+
+===== FF3 Oct4 vs 2026-10-13 artifact hashes
+ frame_energies.npy: {'ff3_hd_av': '834ac1056196', 'ff3_hd_av_2026-10-13': '834ac1056196'} identical=True
+ motion_energies.npy: {'ff3_hd_av': 'c6bb034facbf', 'ff3_hd_av_2026-10-13': '889b0c1f67a1'} identical=False
+ audio_features.npy: {'ff3_hd_av': '864aee27335d', 'ff3_hd_av_2026-10-13': '864aee27335d'} identical=True
+ fixations.npy: {'ff3_hd_av': '0302cf1c2062', 'ff3_hd_av_2026-10-13': '0ad85b6a8f25'} identical=False
+ scanpath.npy: {'ff3_hd_av': '601b8be0b2ae', 'ff3_hd_av_2026-10-13': 'ce7eb48fb274'} identical=False
