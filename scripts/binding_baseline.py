@@ -16,9 +16,18 @@ in chance_inputs.duration_source.
 Usage:
   .venv/bin/python scripts/binding_baseline.py output/ff3_hd_av \
       [more run dirs...]
+
+2026-10-14 (defrag review Fix 5): the sidecar's "generated" stamp
+is the actual run date (it was hardcoded to 2026-10-12), the
+estimator string also covers the grid-corrected tight chance, and
+the sidecar states explicitly that the shift-null context is not
+computable from stored pairs alone (binding_summary already marks
+it unavailable; the note here makes the limitation visible at the
+sidecar's top level).
 """
 
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -59,11 +68,22 @@ def baseline_for_run(run_dir):
                               duration_source=source)
     sidecar = {
         "sidecar_for": "av_binding.json",
-        "generated": "2026-10-12",
+        "generated": datetime.date.today().isoformat(),
         "generator": "scripts/binding_baseline.py",
         "estimator": "poisson: 1 - exp(-lambda_v * 2W), "
                      "lambda_v = n_visual / duration_s "
-                     "(STREAMING-REPORT hand-baseline estimator)",
+                     "(STREAMING-REPORT hand-baseline estimator; a "
+                     "non-exclusive upper reference, not the "
+                     "matcher's chance rate -- see "
+                     "chance_rate_poisson_label). Tight windows "
+                     "also carry the grid-corrected chance "
+                     "1 - exp(-lambda_v * (2W + 50 ms)).",
+        "shift_null_note": "shift_null is unavailable in this "
+                           "sidecar: the null re-runs the matcher "
+                           "on time-shifted event streams and "
+                           "cannot be computed from stored pairs "
+                           "alone. Runs made with bind() since "
+                           "2026-10-14 carry it in av_binding.json.",
         "n_bound": binding["n_bound"],
         **summary,
     }
@@ -79,11 +99,15 @@ def main():
     args = ap.parse_args()
     for run_dir in args.run_dirs:
         out_path, s = baseline_for_run(run_dir)
-        tight50 = s["tight_windows"]["50"]["fraction_of_bound"]
-        print(f"{run_dir}: bound {s['bound_rate']:.3f} vs chance "
-              f"{s['chance_rate_poisson']:.3f} "
-              f"(excess {s['excess_over_chance']:+.3f}); "
-              f"|dt|<=50ms fraction of bound: {tight50:.3f}; "
+        tight50 = s["tight_windows"]["50"]
+        print(f"{run_dir}: bound {s['bound_rate']:.3f} "
+              f"(Poisson upper reference "
+              f"{s['chance_rate_poisson']:.3f}); "
+              f"|dt|<=50ms rate {tight50['bound_rate']:.3f} vs "
+              f"grid-corrected chance "
+              f"{tight50['chance_rate_grid_corrected']:.3f} "
+              f"(excess {tight50['excess_over_grid_chance']:+.3f}); "
+              f"shift null not computable from pairs; "
               f"wrote {out_path}")
 
 
