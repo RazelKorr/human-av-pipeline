@@ -11,11 +11,21 @@ the Poisson chance machinery that now ships alongside it:
   the tight-dt excess and the signed asymmetry show it clearly.
 
 Deterministic seeds throughout.
+
+2026-10-14 (defrag review Fix 1 + Fix 3): the Poisson figure is
+now labelled as a non-exclusive upper reference; the primary
+chance context is the circular time-shift null; tight windows
+carry the grid-corrected chance; dt histogram bins are aligned
+to the 50 ms moment grid; and bind() matches on ms-quantized
+times so pair output no longer depends on float representation.
+New tests pin each of those.
 """
 
 import numpy as np
 
-from streaming.bind_av import bind, binding_summary, poisson_chance_rate
+from streaming.bind_av import (bind, binding_summary,
+                               grid_corrected_chance_rate,
+                               poisson_chance_rate)
 
 
 def _poisson_times(rng, rate_per_s, duration_s):
@@ -64,11 +74,15 @@ def test_poisson_streams_bound_rate_tracks_chance():
     # Tight fraction of bound pairs ~ window ratio 100/500 = 0.20.
     tight50 = b["tight_windows"]["50"]["fraction_of_bound"]
     assert abs(tight50 - 0.20) < 0.08
-    # dt histogram partitions the bound pairs.
+    # dt histogram partitions the bound pairs; bins are aligned
+    # to the 50 ms moment grid (2026-10-14: the old [25, 50) bin
+    # was structurally empty for grid-produced streams).
     hist = b["dt_summary"]["histogram_abs_dt_ms"]
     assert sum(h["n"] for h in hist) == b["n_bound"]
     assert [(h["lo_ms"], h["hi_ms"]) for h in hist] == [
-        (0.0, 25.0), (25.0, 50.0), (50.0, 100.0), (100.0, 250.0)]
+        (0.0, 50.0), (50.0, 100.0), (100.0, 250.0)]
+    assert [h["grid_slots_ms"] for h in hist] == [
+        [0], [50], [100, 150, 200, 250]]
     # No directional asymmetry in pure coincidence.
     asym = b["dt_summary"]["asymmetry"]
     assert abs(asym["frac_audio_after_visual"]
@@ -99,9 +113,10 @@ def test_clustered_stream_shows_tight_dt_excess():
     # bound) and the +-50 ms chance rate.
     assert tight50 > 0.55
     assert b["bound_rate"] > chance_tight + 0.30
-    # Bins 0-25 and 25-50 together hold the bulk of pairs.
+    # The grid-aligned first bin [0, 50) holds the bulk of pairs
+    # (planted |dt| is 10-30 ms, inside the first bin).
     hist = b["dt_summary"]["histogram_abs_dt_ms"]
-    assert hist[0]["fraction"] + hist[1]["fraction"] > 0.55
+    assert hist[0]["fraction"] > 0.55
     # Planted lags put the audio after the visual.
     assert b["dt_summary"]["asymmetry"]["frac_audio_after_visual"] > 0.6
 
@@ -123,3 +138,82 @@ def test_binding_summary_from_stored_pairs():
     assert s["dt_summary"]["asymmetry"]["simultaneous"] == 1
     assert s["dt_summary"]["asymmetry"]["audio_after_visual"] == 1
     assert s["dt_summary"]["asymmetry"]["audio_before_visual"] == 1
+
+
+# ---------------------------------------------------------------------
+# 2026-10-14: grid-corrected chance, shift null, ms quantization
+# ---------------------------------------------------------------------
+
+def test_grid_corrected_chance_prices_the_grid():
+    # FF3 densities at W=50 ms: continuous Poisson says 0.0962;
+    # pricing the inclusive grid window (2W + 50 ms = 150 ms of
+    # exposure) gives 0.1409 -- the binder investigation's figure.
+    cont = poisson_chance_rate(2735, 2701.0, 50.0)
+    grid = grid_corrected_chance_rate(2735, 2701.0, 50.0)
+    assert abs(cont - 0.0962) < 0.001
+    assert abs(grid - 0.1409) < 0.001
+    assert grid > cont
+    # At the wide window the correction is proportionally small.
+    assert grid_corrected_chance_rate(2735, 2701.0, 250.0) > \
+        poisson_chance_rate(2735, 2701.0, 250.0)
+    assert grid_corrected_chance_rate(0, 100.0, 50.0) is None
+    # The tight-window fields ride in binding summaries.
+    s = binding_summary([], n_audio=10, n_visual=2735,
+                        duration_s=2701.0)
+    tw = s["tight_windows"]["50"]
+    assert abs(tw["chance_rate_grid_corrected"] - 0.1409) < 0.001
+    assert "non-exclusive" in s["chance_rate_poisson_label"]
+
+
+def test_shift_null_present_and_sane_on_independent_streams():
+    rng = np.random.default_rng(20261012)
+    duration = 1200.0
+    onsets = [(t, 1.0) for t in _poisson_times(rng, 0.5, duration)]
+    vtrans = [(t, 1.0) for t in _poisson_times(rng, 1.0, duration)]
+    b = bind(onsets, vtrans, duration_s=duration)
+    sn = b["shift_null"]
+    assert sn["available"] is True
+    assert sn["n_shifts"] == 200
+    blk = sn["bound_rate"]
+    # Independent streams: the observed rate is an ordinary draw
+    # from its own shift null -- mean close, percentile central.
+    assert abs(blk["observed"] - blk["null_mean"]) < 0.05
+    assert 1.0 <= blk["observed_percentile"] <= 99.0
+    assert sn["tight_rate_50ms"]["observed"] == \
+        b["tight_windows"]["50"]["bound_rate"]
+
+
+def test_shift_null_absent_states_why_from_pairs_only():
+    s = binding_summary([], n_audio=1, n_visual=1, duration_s=10.0)
+    assert s["shift_null"]["available"] is False
+    assert "pairs" in s["shift_null"]["reason"]
+
+
+def test_bind_ms_quantization_kills_representation_dust():
+    # Same events, two float representations: ms-rounded times
+    # (as stored in av_binding.json) and the runtime's slot x 0.05
+    # form (sub-microsecond dust). Before Fix 3 these bound
+    # differently (FF3: 71 pairs differed); now identical.
+    rng = np.random.default_rng(99)
+    duration = 300.0
+    # On-grid event times (multiples of 0.05), as the pipeline
+    # produces; the two representations below encode the SAME
+    # events, one ms-rounded, one in slot x 0.05 float form.
+    slots_a = sorted(rng.integers(0, int(duration / 0.05),
+                                  size=150).tolist())
+    slots_v = sorted(rng.integers(0, int(duration / 0.05),
+                                  size=150).tolist())
+    rounded_a = [(round(s * 0.05, 3), 1.0) for s in slots_a]
+    rounded_v = [(round(s * 0.05, 3), 1.0) for s in slots_v]
+    dust_a = [(s * 0.05, 1.0) for s in slots_a]
+    dust_v = [(s * 0.05, 1.0) for s in slots_v]
+    r1 = bind(rounded_a, rounded_v, duration_s=duration,
+              shift_null=False)
+    r2 = bind(dust_a, dust_v, duration_s=duration, shift_null=False)
+    assert r1["n_bound"] == r2["n_bound"]
+    assert r1["bound_pairs"] == r2["bound_pairs"]
+    # Off-grid times keep their ms identity (quantization is to
+    # milliseconds, not to the 50 ms grid).
+    r3 = bind([(1.012, 1.0)], [(1.030, 1.0)], duration_s=10.0,
+              shift_null=False)
+    assert r3["bound_pairs"][0]["dt_s"] == -0.018

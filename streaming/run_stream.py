@@ -399,6 +399,17 @@ def main():
               f"{binding['n_audio_onsets']} onsets bound, "
               f"{binding['n_visual_transients']} visual transients)",
               flush=True)
+        _sn = binding.get("shift_null") or {}
+        if _sn.get("available"):
+            _br = _sn["bound_rate"]
+            print(f"binding chance context: shift-null bound rate "
+                  f"mean {_br['null_mean']:.3f} (p5 {_br['null_p5']:.3f}, "
+                  f"p95 {_br['null_p95']:.3f}); observed "
+                  f"{_br['observed']:.3f} at percentile "
+                  f"{_br['observed_percentile']:.0f} "
+                  f"(Poisson {binding['chance_rate_poisson']:.3f} is a "
+                  f"non-exclusive upper reference)",
+                  flush=True)
         # Phase 3: attended transcription -- spotlight, not floodlight
         if args.transcribe_onsets > 0 and audio_events:
             from hva.transcribe import transcribe as transcribe_wav
