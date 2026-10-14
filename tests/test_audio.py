@@ -83,6 +83,52 @@ def test_pick_onsets_min_gap():
     assert abs(onsets[1][0] - 1.5) <= 0.05
 
 
+def test_pick_onsets_brown_noise_bed_px1():
+    # PX.1 regression (2026-10-14, REVIEW-DEFRAG Fix 2): a loud
+    # stationary brown-noise bed must not produce onset counts set
+    # by duration alone. Before the MAD consistency constant, the
+    # k=3 bar sat at ~2.0 sigma of the bed's flux bulk and this
+    # fixture class yielded ~42 false picks per 60 s (filed
+    # experiment: 54 total onsets for 12 planted bursts).
+    rng = np.random.default_rng(20261014)
+    dur_s = 30.0
+    n = int(dur_s * SR)
+    # Stationary noise bed synthesized spectrally (1/sqrt(f)
+    # amplitude): power spread across the band, so per-moment flux
+    # averages over many bins into a tight, near-Gaussian bulk --
+    # the regime of the filed fixture, whose AAC-decoded bed flux
+    # had median 11.67 / p95 15.71 (this bed: median ~19.7,
+    # p95 ~27.2 at the same RMS; see the defrag tuning log).
+    spec = np.fft.rfft(rng.standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / SR)
+    f[0] = f[1]
+    bed = np.fft.irfft(spec / np.sqrt(f), n)
+    bed /= np.sqrt(np.mean(bed ** 2))
+    bed = (bed * 0.0151).astype(np.float64)  # fixture bed RMS
+    planted = [2.5 + 5.0 * k for k in range(6)]
+    t = np.arange(int(0.3 * SR)) / SR
+    fade = np.minimum(1.0, np.minimum(t / 0.05,
+                                      (0.3 - t) / 0.05))
+    for k, t0 in enumerate(planted):
+        freq = 880.0 if k % 2 == 0 else 660.0
+        burst = 0.11 * np.sin(2 * np.pi * freq * t) * fade
+        i0 = int(t0 * SR)
+        bed[i0:i0 + len(burst)] += burst
+    x = bed.astype(np.float32)
+    n_mom = len(x) // SPM
+    rms, flux, _cent, _last = moment_features(
+        x[:n_mom * SPM].reshape(n_mom, SPM))
+    onsets = pick_onsets(flux, rms)
+    # Every planted burst is found.
+    for t0 in planted:
+        assert any(abs(ts - t0) <= 0.5 for ts, _ in onsets), t0
+    # And the bed does not flood: bed-only picks on this bed
+    # measure 28 at the pre-fix bar vs 9 at the fixed bar (30 s,
+    # tuning log in the defrag review), so with bursts the total
+    # lands ~15 post-fix vs ~34 pre-fix.
+    assert len(onsets) <= 2 * len(planted) + 6
+
+
 def test_pick_onsets_rms_floor():
     # tiny clicks below the RMS floor must not onset (encode noise)
     x = _clicks([0.5], seconds=1.0, amp=1e-4)

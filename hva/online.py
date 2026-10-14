@@ -34,6 +34,8 @@ SPM = int(SR * MOMENT_MS / 1000.0)  # 800 samples per moment
 NFFT = 1024
 FREQ_FLOOR = 1e-12
 RMS_FLOOR = 1e-3    # below this: digital silence, not signal
+MAD_TO_SIGMA = 1.4826  # MAD -> sigma consistency constant (Gaussian
+#                        bulk); pick_onsets' k is in these units
 
 
 def moment_features(x, prev_mag=None):
@@ -82,6 +84,17 @@ def pick_onsets(flux, rms, moment_ms=MOMENT_MS, k=3.0,
     that sit below it). Candidates must also clear the RMS floor.
     Local maxima in a ±2-moment neighborhood; min-gap enforced
     greedily by descending strength.
+
+    The MAD is scaled by MAD_TO_SIGMA (1.4826, the Gaussian
+    consistency constant), so k is in robust-sigma units. Before
+    2026-10-14 the MAD was unscaled, putting the k=3 bar at
+    ~median + 2.0 sigma of the local flux bulk: a fixed ~2%
+    per-moment tail exceedance that a stationary bed crosses at a
+    rate set by duration, not events (experiment PX.1:
+    improvements-2026-10/EXPERIMENTS-2026-10-13.md -- 54 onsets on
+    a -36 dBFS brown-noise bed holding 12 planted bursts; after
+    the scaling, 21 onsets with all 12 bursts still found; see
+    improvements-2026-10/REVIEW-DEFRAG-2026-10-14.md Fix 2).
     """
     from scipy.ndimage import median_filter
     flux = np.asarray(flux, dtype=np.float32)
@@ -91,7 +104,7 @@ def pick_onsets(flux, rms, moment_ms=MOMENT_MS, k=3.0,
     lmed = median_filter(flux, size=2 * w + 1, mode="reflect")
     lmad = median_filter(np.abs(flux - lmed), size=2 * w + 1,
                          mode="reflect") + 1e-12
-    thr = lmed + k * lmad
+    thr = lmed + k * MAD_TO_SIGMA * lmad
     # Absolute floor: when the local signal is essentially zero (pure
     # tones, digital silence), the adaptive threshold collapses to
     # numerical noise (~1e-11) and everything fires. 0.1 sits ten
