@@ -172,11 +172,56 @@ def build_bright_silent(out_path):
     return cmd
 
 
+FILL_SEED = 20261014
+
+
+def build_fill_busy(out_path):
+    """Frame-filling busy fixture (2026-10-14, commission 2 R3).
+
+    60 s, 640x360 @ 30 fps. Visual: a seeded random-dot texture
+    (1024x576, values 0/255) scrolling diagonally at constant
+    velocity with wrap-around -- motion at EVERY pixel, unlike
+    dark_busy's two local movers (~2.8% of frame). Mean luma
+    ~0.5, so the darkness gain stays ~1 and only the activity
+    statistic can move the adaptive clocks. Audio: digital
+    silence (the clock question is visual; the ear stays out).
+    Ground truth by construction: full-frame sustained motion
+    for the full minute; the order-of-magnitude motion-contrast
+    pole opposite quiet_room (filed motion-energy mean 0.0).
+    Deterministic: fixed seed, formulaic scroll, fixed encoder.
+    """
+    import numpy as _np
+    rng = _np.random.default_rng(FILL_SEED)
+    tex = (rng.integers(0, 2, size=(576, 1024)) * 255).astype(_np.uint8)
+    cmd = ["ffmpeg", "-y",
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "640x360",
+           "-r", "30", "-i", "-",
+           "-f", "lavfi", "-i",
+           "anullsrc=channel_layout=mono:sample_rate=44100",
+           "-map", "0:v", "-map", "1:a",
+           "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+           "-pix_fmt", "yuv420p",
+           "-c:a", "aac", "-t", f"{CROSSED_DURATION_S:.0f}", out_path]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    vx, vy = 3, 2  # texture px per frame at work resolution
+    for i in range(int(CROSSED_DURATION_S * 30)):
+        ox, oy = (vx * i) % 1024, (vy * i) % 576
+        frame = _np.roll(tex, shift=(-oy, -ox), axis=(0, 1))[:360, :640]
+        proc.stdin.write(_np.stack([frame] * 3, axis=-1).tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg fill_busy failed: {proc.returncode}")
+    return cmd
+
+
 BUILDERS = {"quiet": build_quiet_room, "dark_busy": build_dark_busy,
-            "bright_silent": build_bright_silent}
+            "bright_silent": build_bright_silent,
+            "fill_busy": build_fill_busy}
 DEFAULT_OUTS = {"quiet": "quiet_room_60s.mp4",
                 "dark_busy": "dark_busy_60s.mp4",
-                "bright_silent": "bright_silent_60s.mp4"}
+                "bright_silent": "bright_silent_60s.mp4",
+                "fill_busy": "fill_busy_60s.mp4"}
 
 
 def main():
