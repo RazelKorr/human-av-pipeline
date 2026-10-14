@@ -1,14 +1,33 @@
 # Human Auditory Attention Pipeline (HAP) — SPEC
 
+> **Specs rewritten 2026-10-13.** This spec now describes the streaming
+> generation the 2026-10 improvement phases actually built, not only the
+> batch generation it originally described. Where the two generations
+> differ, both are named and labelled. Every architectural claim below is
+> traceable to code in `hva/`, `scripts/`, `streaming/`, or a phase
+> artifact in `improvements-2026-10/`.
+
 Experimental demonstration, not a validated model of hearing. Built 2026-09-30.
 
 ## What it is
 
 A pipeline that listens to audio the way the vision pipeline watches video:
 sound goes in, and out comes a trace of where "attention" was, moment by
-moment, plus a list of events (captures, switches, quiet dwelling). The
-clock is shared with vision: 100ms perceptual moments, so the two can
-eventually be fused.
+moment, plus a list of events (captures, switches, quiet dwelling).
+
+**Two generations, two clocks — read this first.** The batch ear
+described in "The stages" below (`cochlea → salience → moments →
+attention`) runs on **100 ms perceptual moments**, the clock it shares
+with the batch vision pipeline, and it is what the Level 1/2/3 fusion
+scripts and `hva/stream.py` use. The **flagship streaming runs do not
+use that stack**: they use the streaming ear, `hva/online.py` (§ "The
+streaming ear"), on the **50 ms / 20 Hz master grid** it shares with
+the streaming vision path. `hva/cochlea.py`, `hva/salience.py`, and
+`hva/attention.py` are exercised by the batch/fusion paths and their
+battery, but they did not produce the FF3 or Star Tours flagship
+reviews. A reader who misses this distinction will form a materially
+wrong picture of what produced those reviews (audit 2026-10-12,
+Lane 1).
 
 ## The stages
 
@@ -81,6 +100,61 @@ Two rules with RazelKorr's fingerprints on them:
   nothing, because argmax is scale-invariant. The refractory is the honest
   mechanism.)
 
+## The streaming ear (`hva/online.py`) — the flagship generation
+
+The ear's magno channel: coarse, cheap, always-on — the auditory answer
+to `hvp/motion.py`. Per **50 ms** perceptual moment (the master grid
+shared with streaming vision) it computes exactly three floats:
+
+- **RMS energy**,
+- **spectral flux** (onset strength: the sum of positive spectral
+  differences, computed with an NFFT of 1024 at 16 kHz), and
+- **spectral centroid** (brightness).
+
+Design decisions, from the module itself:
+
+- Flux is **absolute**, not loudness-relative: a roar over an
+  already-loud bed is still a big transient, and relative normalization
+  was measured (2026-10-03) to rank the hyperspace roars 170th/202nd.
+  Loudness-invariance instead comes from the adaptive threshold in
+  onset picking.
+- **Onsets (`pick_onsets`)** are peak-picked with a *local* threshold —
+  median + 3·MAD of flux over a ±2 s window, an absolute floor of 0.1,
+  an RMS floor of 1e-3 (below which digital silence does not onset on
+  encode noise), local maxima in a ±2-moment neighbourhood, and a
+  250 ms minimum gap enforced greedily by descending strength.
+- Moment *features* are computed per chunk (streaming-pure; the caller
+  threads the previous chunk's last magnitude frame through for flux
+  continuity across chunk boundaries). The onset *decision* is post-hoc
+  over the finished flux curve, mirroring how the visual event map is
+  produced at end of run. That is documented in the module, not hidden.
+- In `streaming/run_stream.py` this ear is **passive by design**: its
+  features observe the master grid and supply onsets for binding
+  (SPEC_FUSION) and for attended transcription, but they never steer
+  the vision driver or render — the video path is bit-identical with
+  audio on or off. Cost in the FF3 flagship run: 0.0356 ms per moment.
+
+## Interpretation (`hva/interpret.py`) — labels and two-tier transcription
+
+Undocumented in earlier versions of this spec; it is the FF3
+interpretation pathway.
+
+- **CLAP zero-shot labelling** (`label_window`): sound-event labels per
+  window from the local CLAP model (weights
+  `models/laion-clap-630k-audioset-best.pt`, 48 kHz).
+- **Two-tier transcription** (`transcribe_two_tier`): faster-whisper
+  **base** first; any segment whose `avg_logprob` falls below
+  `LOW_CONF_THRESHOLD = −0.8` escalates to **medium**. The threshold is
+  a single source of truth — the mishearing model imports it rather
+  than restating it. On FF3, 110 interpretation windows were
+  transcribed two-tier, 47 escalated, 0 errors; the base tier's
+  "We're in Marvel!" hallucination at 1649.7 s is the tier system
+  working as designed (the medium tier resolved the window to
+  non-lexical vocalizations).
+- Music features are also computed here; see the module for the
+  inventory. Interpretation runs are driven by the `scripts/interpret_*.py`
+  / FF3 driver scripts, not by the streaming runner itself.
+
 ## Bugs found and fixed (the real lessons)
 
 1. **argmax of an all-zero field is 0, and 0 is a valid bin.** Twice this
@@ -115,15 +189,17 @@ future work, not v1. The frequency-switch controller is also not the full
 story: real auditory attention is object-, stream-, time- and
 space-selective, not just frequency-selective.
 
-## What's next (status 2026-10-03)
+## What's next (status 2026-10-13)
 
 The Star Tours 0-62s audio run and the quiet-dwell A/B are done (see
-above). The open problem stands: auditory streaming / object formation —
-the pipeline knows the waveform cold but can't tell the Starspeeder's
-engines from the score. Frequency-band attention is not the full story:
-interleaved-stream segregation (taking-turns streams) needs temporal
-prediction, and real auditory attention is object-, stream-, time- and
-space-selective, not just frequency-selective.
+above). The open problem stands, with one experimental first step now
+on record: auditory streaming / object formation — the pipeline knows
+the waveform cold but can't tell the Starspeeder's engines from the
+score (see "Stem streams" below for what the demucs experiment did and
+did not change about that). Frequency-band attention is not the full
+story: interleaved-stream segregation (taking-turns streams) needs
+temporal prediction, and real auditory attention is object-, stream-,
+time- and space-selective, not just frequency-selective.
 
 ## Star Tours 0-62s run (2026-09-30)
 
@@ -185,12 +261,89 @@ itself had no representation of what was said.
 Honest limits, stated up front:
 - v1 is verbatim transcription -- superhuman. No human catches every
   word. Per-segment avg_logprob and per-word probabilities are
-  recorded as the hook for a future mishearing model.
+  recorded — and, since Phase 5 (2026-10-12), they are the input to
+  an actual mishearing model; see the next section. The verbatim
+  text remains the only transcript claim either way.
 - "Perfect" hearing still misinterprets: transcription is not
   comprehension. Word sense, sarcasm, reference are not modeled.
   Deferred explicitly, not forgotten.
 - No diarization in v1: turns are approximated from segment
   boundaries + gaps, not voice identity.
+
+## The mishearing model (`hva/mishear.py`) — Phase 5, 2026-10-12
+
+**Experimental. Not wired into the flagship streaming path.** The
+module embodies the standing rule: *transcription claims carry
+logprobs or they don't ship.*
+
+- **Gate.** Only segments with `avg_logprob` below the interpret.py
+  escalation threshold (−0.8, imported — one source of truth) are
+  modelled, and within them only words with probability below 0.5
+  (at most 3 words per segment, at most 5 alternatives each).
+  Segments **without** a logprob are never modelled.
+- **Method.** A self-contained Metaphone-lite phonetic key generates
+  candidates from the whisper tokenizer vocabulary (exact-key tier,
+  similarity 1.0; key edit-distance-1 tier, 0.5), rescored
+  `(1 − word_prob) × phonetic similarity × frequency prior`. Scores
+  are relative ranks, not probabilities. Candidate lists include
+  sub-word BPE fragments ("maravil", "ine") — labelled model output,
+  ranked by the same score; a wordlist-grade filter is future work.
+- **Output, and the non-negotiable rule.** Per segment:
+  `verbatim` (byte-identical; the input is never mutated),
+  `confidence`, and `modeled_mishearings` — every record labelled
+  MODEL OUTPUT with a disclaimer. **The model annotates doubt with
+  phonetic alternatives; it NEVER replaces the verbatim transcript.**
+- **What it cannot do, demonstrated.** On the FF3 1649.7 s window the
+  base tier's "Marvel" (prob 0.091) models to *memorable / marble /
+  maravil* — plausible lexical neighbours. None of the alternatives,
+  for any word in the window, recovers what the medium tier found:
+  non-lexical screams ("BLEH", "NOOOO"). The model proposes lexical
+  neighbours of the words the base tier *thought* it heard; it cannot
+  know the sound was non-lexical. It annotates doubt; it does not
+  correct hallucinations into truth. That limitation is the phase's
+  headline result (`output/ff3_hd_av/mishear_demo_1649.json`;
+  tests `tests/test_mishear.py`, 8/8).
+
+## Stem streams (`scripts/stem_streams.py`) — Phase 5, 2026-10-12
+
+**Experimental. Not wired into the flagship streaming path.** A first
+auditory-object layer, with its leakage caveats stated, not smoothed
+over.
+
+Demucs stems (vocals / no_vocals, via the restored
+`--separate-vocals` path) each run through the streaming ear's
+features + onset picking (`hva/online.py`), two-tier transcription,
+and CLAP aggregation, emitting one stream record per stem in a single
+JSON. Stems are demucs **model output**: a stem stream describes what
+demucs isolated, not ground truth about the original mix.
+
+- **At the label/transcript level, the stems separate voice from
+  non-voice convincingly.** Synthetic mix (Star Tours vocals excerpt
+  + a planted tone sequence at −6 dB, ground truth known): vocals-stem
+  token containment 0.647 against the pre-mix transcript (bar 0.6;
+  the famous lines survive, the opening line is garbled, and the
+  transcript fragments into 13 micro-segments); no_vocals stem CLAP
+  top-1 "singing" (a thin margin over "silence") with an empty
+  transcript. Real-world demo (62 s of Star Tours): the vocals stem
+  recovers 44 words of genuine dialogue, all segments at
+  `avg_logprob ≥ −0.8`; the no_vocals stem transcribes 0 words with
+  CLAP top-1 "music".
+- **At the onset/feature level, they do NOT yet form clean objects —
+  the stems leak.** Tone-burst times appear in the vocals stem's
+  onsets and speech times in the no_vocals stem's; each stem
+  approximates the union minus a little. Worse in the wild: on the
+  real Star Tours demo the stems' onset counts (68 / 60) **exceed**
+  the un-separated mix (54) — separation artifacts manufacture
+  transients, so the per-stem onset sparsity seen on the synthetic
+  mix is a synthetic-mix result, not a wild one.
+- **Cross-cutting caveat.** This faster-whisper's per-segment
+  `avg_logprob` is near-uniform within a run (−0.554 across all 13
+  synthetic segments), so confidence discrimination in these outputs
+  is coarse; the garbage-flag heuristic inherits that coarseness.
+
+Verdict, in the phase summary's words: a first auditory-object layer
+exists; it is leaky, and the leak is measured. The v1 gap named above
+is narrowed at the label/transcript level, not closed.
 
 First transcript (Dr Tran Ep 17, first 30 s): 14 segments, 5 speech
 events, 80.9% of moments carrying speech. The narrator's affected

@@ -68,8 +68,11 @@ the 100 ms moment grid. Speech onsets become first-class attention
 events instead of anonymous transients -- the pipeline can now hear
 *words*, which is the whole point of speech. v1 is verbatim
 transcription (superhuman: no human catches every word); confidence
-scores are recorded as the hook for a future mishearing model, and
-transcription-is-not-comprehension is explicitly deferred. Requires
+scores are recorded, and since Phase 5 (2026-10-12) they feed an
+experimental mishearing model (`hva/mishear.py`) that annotates doubt
+with phonetic alternatives and never replaces the verbatim text (see
+SPEC_AUDIO.md), and transcription-is-not-comprehension is explicitly
+deferred. Requires
 the repo venv (`./.venv`, at the repo root; see SETUP.md) --
 system Pythons managed by the OS fight the install. Model weights live in
 `models/faster-whisper-base` (gitignored, downloaded once).
@@ -114,9 +117,15 @@ flags, energies, and saccades (30 s / 62 s / full-film validated);
 compute proper ~1.7x. Opt-in modes: chroma passthrough and luma_ratio
 (faster render), fovea-level reduction, mask cache, magno channel
 (motion energy + smooth pursuit). Full numbers, mode inventory, and
-dated build diary: `streaming/STREAMING-REPORT.md`. Vision-only by
-design; audio streams via `hva/stream.py` and the Level-3 pairing
-pattern in `scripts/run_level3_stream.py`.
+dated build diary: `streaming/STREAMING-REPORT.md`. The harness
+itself is vision-only by design; the flagship runner
+(`streaming/run_stream.py`) additionally computes passive streaming-ear
+audio (per-50 ms RMS/flux/centroid features and onsets from
+`hva/online.py`) and AV coincidence binding with its Poisson chance
+baseline (`streaming/bind_av.py`) in the same run — the audio observes
+and never steers vision (see SPEC_FUSION.md). Audio also streams via
+`hva/stream.py` and the Level-3 pairing pattern in
+`scripts/run_level3_stream.py`.
 
 ## Running it
 
