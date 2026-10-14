@@ -1403,3 +1403,38 @@ target`, which pinned the pursuit mechanism under what was then
 the default — now pinned to `pursuit_mode="legacy"` explicitly,
 with the residual mode's mover behavior covered by its own
 tests.
+
+## Addendum 2026-10-14: the chance baseline was mislabeled — corrected reporting
+
+The 2026-10-03 addenda above (and the experiment summaries that
+followed them) read FF3's bound rate against the Poisson figure
+as if it were the binder's chance rate — "35.9% bound vs 39.7%
+chance — below chance." The binder investigation of 2026-10-13
+(`binder-investigation-2026-10-13.md`, repo root) decomposed that
+deficit: the Poisson formula prices a non-exclusive, uniform,
+continuous-time at-least-one rate, while the binder is a
+one-to-one greedy matcher fed bursty streams on a 50 ms grid.
+Grid-corrected, FF3's tight-window excess is +0.5 pt (not +4.9),
+Star Tours' is +0.9 pt (not +6.2), and a matcher-in-the-loop
+circular time-shift null puts FF3's observed tight rate at the
+null's center (observed 0.1457, null mean 0.1461): the deficit is
+~87% baseline artifact, ~13% material (real burst geography —
+audio bursts are denser than visual bursts and starve the
+one-to-one matcher). Star Tours' "strongest dt clustering" was a
+denominator artifact of the same mislabel. The music-dominant
+YTPMV result survives every correction (+9.1 pts tight excess,
+grid-corrected) — it is the corpus's genuine binding.
+
+As of the 2026-10-14 defrag review
+(`improvements-2026-10/REVIEW-DEFRAG-2026-10-14.md`, Fixes 1
+and 3), the corrected reporting is implemented, not just
+recommended: `bind()` output carries a `shift_null` field
+(circular time-shift null, 200 seeded grid-multiple shifts, the
+same matcher re-run per shift) as the primary chance context;
+tight windows carry `chance_rate_grid_corrected`; the Poisson
+fields are labelled as a non-exclusive upper reference; dt
+histogram bins are aligned to the moment grid; and matching runs
+on ms-quantized times so pair output no longer depends on float
+representation. Historical numbers in the addenda above stand as
+written — they were computed under the old framing, and this
+addendum is the correction pointer.
