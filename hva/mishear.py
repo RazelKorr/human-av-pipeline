@@ -312,3 +312,32 @@ def model_segment(segment: dict,
 def model_segments(segments: list[dict], **kw) -> list[dict]:
     """model_segment over a segment list, order preserved."""
     return [model_segment(s, **kw) for s in segments]
+
+
+def build_doubt_track(segments: list[dict], **kw) -> dict:
+    """The doubt track: mishear annotations as a first-class
+    parallel track (W5, commission 2, 2026-10-14).
+
+    A transcript's doubt used to live in a side file the review
+    might never open (or nowhere -- the model was not wired
+    into the flagship path at all). This packages the modeled
+    annotations as ONE track object meant to travel inside the
+    standard run output, parallel to the segments it annotates:
+    `entries[i]` annotates `segments[i]`, always, so a reader
+    (human or review pass) meets the doubt at the same moment
+    as the claim. The track annotates; it never corrects --
+    every entry's `verbatim` is the segment's own text,
+    byte-identical, and the track carries the model tag and
+    disclaimer at its head rather than trusting the reader to
+    remember them.
+    """
+    entries = model_segments(segments, **kw)
+    return {
+        "track": "doubt",
+        "model": MODEL_TAG,
+        "model_output": True,
+        "disclaimer": DISCLAIMER,
+        "n_segments": len(entries),
+        "n_modeled": sum(1 for e in entries if e["modeled"]),
+        "entries": entries,
+    }

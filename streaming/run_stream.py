@@ -455,6 +455,7 @@ def main():
         # Phase 3: attended transcription -- spotlight, not floodlight
         if args.transcribe_onsets > 0 and audio_events:
             from hva.transcribe import transcribe as transcribe_wav
+            from hva.mishear import build_doubt_track
             top = sorted(audio_events, key=lambda o: -o["strength"]
                          )[:args.transcribe_onsets]
             for o in top:
@@ -466,6 +467,10 @@ def main():
                      "-i", args.video, "-t", "8", "-vn",
                      "-ar", "16000", "-ac", "1", wav], check=True)
                 segs = transcribe_wav(wav, model_size="base", vad=False)
+                # Word probs travel with the segments (the doubt
+                # track models from them), and the doubt track
+                # itself is a first-class parallel field of this
+                # artifact (W5, 2026-10-14) -- not a side file.
                 onset_transcripts.append({
                     "t_s": o["t_s"], "strength": o["strength"],
                     "window_s": [round(w0, 1), round(w0 + 8.0, 1)],
@@ -473,8 +478,18 @@ def main():
                                   "end": round(s["end"], 2),
                                   "text": s["text"].strip(),
                                   "avg_logprob": round(
-                                      float(s["avg_logprob"]), 3)}
-                                 for s in segs]})
+                                      float(s["avg_logprob"]), 3),
+                                  "words": [
+                                      {"start": round(
+                                          float(wd["start"]), 2),
+                                       "end": round(
+                                           float(wd["end"]), 2),
+                                       "word": wd["word"],
+                                       "prob": round(
+                                           float(wd["prob"]), 3)}
+                                      for wd in s.get("words", [])]}
+                                 for s in segs],
+                    "doubt": build_doubt_track(segs)})
             with open(os.path.join(args.outdir, "onset_transcripts.json"),
                       "w") as f:
                 json.dump(onset_transcripts, f, indent=2)

@@ -34,6 +34,10 @@ A claim carried forward from a prior review is re-verified against the new run's
 
 The beat map is built autonomously — he does not rewatch everything sent. He is the appeals court: he corrects the map when it's wrong (as on 2026-10-03), or not at all. The protocol must work without him; it works better with him.
 
+## Doubt track pass (2026-10-14)
+
+Every transcript segment a review relies on is read together with its doubt-track entry (`onset_transcripts.json` → `doubt`, built by `hva.mishear.build_doubt_track`): modeled alternatives are labeled model output, and no claim rests on a flagged word without the flag being stated in the review.
+
 ## 6. Beat-source tooling status (2026-10-03 audit)
 
 What the pipeline can actually supply for each beat source today:

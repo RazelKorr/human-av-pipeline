@@ -14,8 +14,8 @@ import os
 
 import pytest
 
-from hva.mishear import (candidate_readings, model_segment,
-                         model_segments, phonetic_key)
+from hva.mishear import (build_doubt_track, candidate_readings,
+                         model_segment, model_segments, phonetic_key)
 
 VOCAB = {"their": 100, "there": 90, "they": 95, "night": 200,
          "knight": 210, "marvel": 300, "marble": 400, "calm": 500}
@@ -114,3 +114,31 @@ def test_real_vocab_marvel_has_marble():
     exact = {a["reading"] for a in alts if a["key_match"] == "exact"}
     assert "marble" in exact
     assert "marvel" not in {a["reading"] for a in alts}
+
+
+def test_doubt_track_is_parallel_and_labeled():
+    # W5 (2026-10-14): the doubt track travels as one labeled
+    # object, entries parallel to the segments by index,
+    # verbatim byte-identical, input unmutated.
+    segs = [
+        _seg("their house", -1.0, [
+            {"start": 0.0, "end": 0.4, "word": " their",
+             "prob": 0.2},
+            {"start": 0.4, "end": 0.9, "word": " house",
+             "prob": 0.95}]),
+        _seg("clear words", -0.1, [
+            {"start": 0.0, "end": 0.5, "word": " clear",
+             "prob": 0.99}]),
+    ]
+    before = copy.deepcopy(segs)
+    track = build_doubt_track(segs, vocab=VOCAB)
+    assert segs == before  # input unmutated
+    assert track["track"] == "doubt"
+    assert track["model_output"] is True
+    assert "MODEL OUTPUT" in track["disclaimer"]
+    assert track["n_segments"] == 2
+    assert len(track["entries"]) == len(segs)
+    assert track["entries"][0]["verbatim"] == segs[0]["text"]
+    assert track["entries"][1]["verbatim"] == segs[1]["text"]
+    assert track["n_modeled"] == 1  # only the low-conf segment
+    assert track["entries"][1]["modeled"] is False
