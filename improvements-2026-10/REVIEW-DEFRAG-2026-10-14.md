@@ -399,3 +399,39 @@ histogram contract, updated under Fix 1.
    signature. If a future fixture demands fewer, the honest
    lever is k itself (with the real-material recount that
    implies), not another per-pick gate.
+
+---
+
+## Addendum 2026-10-14 (commission 2) — left-open items 1–3, resolved
+
+Appended, append-only; the text above stands as written. Full
+detail: `improvements-2026-10/REVIEW-WILD-2026-10-14.md`;
+captured logs: `improvements-2026-10/logs/wild-2026-10-14/`.
+
+**Item 1 — visual_transients: INDICTED and fixed.** The sealed
+fixture the left-open item asked for (stationary noisy energy
+bed, 10 planted transients) returned 41 picks / 31 false alarms
+under the unscaled bar — the PX.1 shape, one channel over.
+`visual_transients` now scales its MAD by
+`VISUAL_MAD_TO_SIGMA` (1.4826, the same constant as the ear):
+fixture 11 picks, 10/10 planted, 1 false; dark-busy corpus
+transients 56 → 53. Counts across this boundary are not
+comparable, same caveat class as Fix 2.
+
+**Item 2 — Star Tours / Dr Tran recounts under the fixed ear**
+(method identical to the FF3/YTPMV recounts above; the method
+reproduces FF3's 2,409 from stored features exactly). Filed →
+recount: Star Tours onsets **238 → 103**, bound 91 → 37,
+bound rate 0.3592, tight-50 rate 0.1942 vs grid-corrected
+chance 0.1671, shift-null tight percentile **81.0** (wide
+10.5). Dr Tran ep4 onsets **588 → 377**, bound 298 → 199,
+bound rate 0.5279, tight-50 rate 0.1963 vs grid chance
+0.1868, shift-null tight percentile **87.0** (wide 91.5).
+Both verdicts unchanged: at chance under the corrected
+reporting, as they were under both earlier bars. The filed
+counts above in this review (3,362-era) and these recounts
+are not comparable across the PX.1 boundary — that caveat
+applies wherever any of these numbers are cited.
+
+**Item 3 — adaptive clock: adjudicated.** See EXPERIMENTS-
+2026-10-13 addendum (commission 2, R3) and the wild review.
