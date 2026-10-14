@@ -106,8 +106,11 @@ def main():
                          "historical rate; 'adaptive' = luminance + "
                          "activity modulated (audit item 10); "
                          "'adaptive_td' = adaptive with a top-decile "
-                         "activity statistic (2026-10-13 follow-up). "
-                         "Default: the driver's current default")
+                         "activity statistic (2026-10-13 follow-up; "
+                         "RETIRED 2026-10-14 after the R3 "
+                         "adjudication -- kept runnable for "
+                         "reproduction only). Default: the driver's "
+                         "current default")
     ap.add_argument("--motion-thumb", default=None, metavar="WxH",
                     help="magno-channel thumbnail size, e.g. 160x90 "
                          "(default: 96x54 16:9; the benchmarked winner "

@@ -23,6 +23,7 @@ values agree to <0.1 s on every file in the table).
 | FF3 1080p | `ff3_full_hd.mp4` | egomotion | 2701.0 s | 0.0186 | 0.1733 | 1.24/s (3362) | `output/ff3_hd_av/` |
 | Dr Tran ep4 | `drtran_ep4_toy_cack.mp4` | dialogue | 436.1 s | 0.0125 | 0.0657 | 1.35/s (588) | `output/drtran_ep4_av/` |
 | Quiet room | `quiet_room_60s.mp4` | quiet / near-silent | 60.0 s | 0.000000 | 0.0008 | 0.017/s (1) | `output/quiet_room_60s/` (+ `_adaptive`) |
+| Fill busy | `fill_busy_60s.mp4` | frame-filling scroll (global motion) | 60.0 s | 0.009252 | — | 0/s (0) | `output/wild-2026-10-14/fx_fill/` |
 
 How each measured column is produced (measured 2026-10-12 for
 this table, not transcribed from prose):

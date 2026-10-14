@@ -493,3 +493,82 @@ Exp (iv) verdict: **2 hit, 1 partial, 1 miss** (PT.1, the
 headline, missed).
 
 ---
+
+## Addendum 2026-10-14 (commission 2, R3) — adaptive-clock adjudication on order-of-magnitude motion contrast
+
+Appended, append-only; Exp (iv) above stands as written.
+Predictions sealed before the runs in
+`logs/wild-2026-10-14/SEALED-PREDICTIONS.md`; run artifacts in
+`output/wild-2026-10-14/`; scores in `logs/wild-2026-10-14/
+r3_scores.log`. Configuration: flagship 640x360, motion-weight
+1.0, pursuit OFF (the Exp iv clock-validation configuration).
+
+**Fixtures.** quiet_room_60s (filed motion-energy mean
+0.000000) vs a NEW generated fixture, `fill_busy_60s.mp4`
+(`scripts/make_fixtures.py --kind fill_busy`): a seeded
+random-dot texture scrolling diagonally — motion at every
+pixel, mean luma ~0.5 (darkness gain ~1), silent audio. Plus
+dark_busy under adaptive_td as the secondary readout (the
+pair Exp (iv)'s disposition named). Sealed calibration
+target for fill_busy: driver motion-energy mean >= 0.05.
+
+**Calibration failure, on record:** fill_busy's measured
+motion-energy mean is **0.009252** — statistically the same
+as dark_busy's 0.009238, not the sealed >= 0.05. Mechanism:
+the magno channel's energy is coherence-gated (raw diff
+minus a heavily blurred copy — the egomotion suppression),
+and a uniform full-frame scroll is almost pure global
+translation, i.e. exactly what the gate removes. The fixture
+fills the frame with motion the pipeline is designed to
+ignore. Its motion PROXY (raw frame diff) is large; the
+statistic the clock actually consumes is not. Any future
+"busy" fixture must be built from incoherent LOCAL motion
+(many independent movers), not global flow.
+
+**Scores** (saccade rates from run_report/scanpath):
+- **PR3.1 MISS** — adaptive_td: quiet 94 (1.567/s), fill 138
+  (2.300/s): divergence **+0.733/s** vs sealed >= +2.0 with
+  fill >= 4.2/s. (It also misses Exp (iv)'s original 0.8/s
+  bar, narrowly.) Quiet's <= 2.2/s clause holds.
+- **PR3.2 HIT** — fixed controls flat: quiet 199 (3.317/s),
+  fill 199 (3.317/s), divergence 0.000.
+- **PR3.3 MISS** — the named pair goes the wrong way:
+  dark_busy under adaptive_td is 86 saccades (1.433/s),
+  SLOWER than the quiet room's 94 (1.567/s), divergence
+  **−0.133/s** vs sealed >= +0.8. The sealed risk is the
+  finding: dark_busy's movers cover ~2.8% of the frame, so
+  the motion map's 90th percentile sits at the noise floor
+  on both fixtures, and what little separates the runs is
+  darkness-gain arithmetic, not activity.
+- **PR3.4 narrow MISS** — td_dark's realized 1.433/s dips
+  below the clock's nominal [1.5, 5.0]/s band: decision
+  times quantize to frame arrivals (30 fps), adding up to
+  ~33 ms per decision on top of the 667 ms clip
+  (86 decisions x ~698 ms mean interval). A framing effect,
+  named here rather than rounded away.
+
+**What the TD statistic actually responds to:** fill (138)
+> quiet (94) > dark (86). The ordering tracks the residual
+energy map's frame COVERAGE — fill's gate-leakage is
+frame-wide so its p90 is uniformly elevated; dark's real
+motion is stronger but covers 3% of the map, below the
+decile. A top-decile statistic measures how much of the
+frame is moving, not how much motion there is. Across four
+regime pairs now (Pink Panther bedroom/brawl, quiet/fill,
+quiet/dark, and Exp (iv)'s controls) it has never separated
+at the bar.
+
+**Verdict (per the sealed disposition rule): adaptive_td is
+RETIRED** — marked deprecated in `streaming/online_driver.py`
+and the run_stream help. It stays runnable (the sealed runs
+must stay reproducible) but is a closed line: two sealed
+negative results and one adjudication. The mean-statistic
+`adaptive` clock is untouched by this verdict (its Exp (ii)
+separations stand). The default stays **fixed**. The one
+question this experiment could not ask — a fixture whose
+DRIVER-statistic motion energy is >= 10x the quiet room's —
+needs incoherent local motion at frame scale; if such a
+fixture is ever built, the mean clock is the statistic to
+test on it first, not the decile.
+
+---

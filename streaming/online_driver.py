@@ -54,6 +54,18 @@ ACT_REF_TRANS = 0.05        # transient-mean at "normal" activity
 # mover leaves the 90th percentile low while frame-filling
 # motion raises it. References are scaled for a top-decile of a
 # sparse map (several x its mean).
+#
+# DEPRECATED / RETIRED 2026-10-14 (commission 2, R3
+# adjudication; EXPERIMENTS-2026-10-13 addendum): on
+# order-of-magnitude motion-contrast fixtures (quiet room vs
+# frame-filling scroll vs dark-busy) adaptive_td diverged by
+# +0.733/s and -0.133/s against a sealed >= +0.8 bar -- the
+# decile measures the motion map's frame COVERAGE, not its
+# motion (a 3%-of-frame mover never reaches the 90th
+# percentile; global scroll is eaten by the coherence gate
+# before the decile sees it). Kept runnable so the sealed
+# runs stay reproducible; do not build on it. The mean
+# "adaptive" clock is unaffected by this verdict.
 ACT_REF_TD_MOTION = 0.06    # magno motion top-decile at "normal"
 ACT_REF_TD_TRANS = 0.25     # transient top-decile at "normal"
 BUSY_MIN = 0.70             # quiet scenes: interval / 0.70 max stretch
