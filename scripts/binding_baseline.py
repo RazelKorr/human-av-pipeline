@@ -37,6 +37,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from streaming.bind_av import binding_summary  # noqa: E402
+from streaming.provenance import provenance_record  # noqa: E402
 
 
 def baseline_for_run(run_dir):
@@ -70,6 +71,9 @@ def baseline_for_run(run_dir):
         "sidecar_for": "av_binding.json",
         "generated": datetime.date.today().isoformat(),
         "generator": "scripts/binding_baseline.py",
+        "provenance": provenance_record(
+            config={"workflow": "binding_baseline",
+                    "run_dir": run_dir}),
         "estimator": "poisson: 1 - exp(-lambda_v * 2W), "
                      "lambda_v = n_visual / duration_s "
                      "(STREAMING-REPORT hand-baseline estimator; a "

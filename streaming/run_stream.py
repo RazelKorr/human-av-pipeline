@@ -46,6 +46,8 @@ from feeder import ChunkedFeeder, decode_audio_track
 from bind_av import visual_transients, bind as bind_av
 from online_driver import OnlineAttentionDriver, DEFAULT_MOTION_THUMB_WH
 from online_render import OnlineVisionPipeline
+from streaming.provenance import (default_seeds, provenance_record,
+                                  write_manifest)
 
 
 def _validate_args(args):
@@ -165,6 +167,28 @@ def main():
                          "floodlight)")
     args = ap.parse_args()
     _validate_args(args)
+    # Provenance (W1, 2026-10-14): one record for the whole run,
+    # stamped into the binding + report and written as the
+    # outdir manifest, so every number this run files can be
+    # traced to the exact code state that produced it.
+    run_config = {
+        "video": os.path.basename(args.video),
+        "seconds": args.seconds, "width": args.width,
+        "height": args.height, "moment_ms": args.moment_ms,
+        "chroma_weight": args.chroma_weight,
+        "motion_weight": args.motion_weight,
+        "pursuit": bool(args.pursuit),
+        "pursuit_mode": args.pursuit_mode,
+        "saccade_clock": args.saccade_clock,
+        "chroma_mode": args.chroma_mode,
+        "fovea_levels": args.fovea_levels,
+        "audio": bool(args.audio),
+        "transcribe_onsets": int(args.transcribe_onsets),
+        "dual_decode": bool(args.dual_decode),
+        "single_mode": args.single_mode,
+    }
+    prov_record = provenance_record(config=run_config,
+                                    seeds=default_seeds())
     moment_ms = args.moment_ms
     moment_hz = 1000.0 / moment_ms
     w, h = args.width, args.height
@@ -410,6 +434,7 @@ def main():
         vtrans = visual_transients(e_tot, frame_t_log)
         binding = bind_av([(o["t_s"], o["strength"]) for o in audio_events],
                           vtrans, duration_s=total)
+        binding["provenance"] = prov_record
         with open(os.path.join(args.outdir, "av_binding.json"), "w") as f:
             json.dump(binding, f, indent=2)
         print(f"wrote av_binding.json ({binding['n_bound']}/"
@@ -496,6 +521,7 @@ def main():
         "motion_thumb_direct": (f"{feeder_thumb_wh[0]}x{feeder_thumb_wh[1]}"
                                 if feeder_thumb_wh else None),
         "integration_window_ms": B.INTEGRATION_WINDOW_MS,
+        "provenance": prov_record,
         "streaming": {
             "realtime": args.realtime,
             "speed": args.speed,
@@ -518,6 +544,13 @@ def main():
     with open(os.path.join(args.outdir, "run_report.json"), "w") as f:
         json.dump(report, f, indent=2)
     print("wrote run_report.json", flush=True)
+    manifest_path = write_manifest(args.outdir, prov_record, [
+        "video_percept.mp4", "fixations.npy", "frame_energies.npy",
+        "scanpath.npy", "motion_energies.npy", "pursuit_log.npy",
+        "audio_features.npy", "audio_events.json", "av_binding.json",
+        "onset_transcripts.json", "run_report.json"])
+    print(f"wrote {os.path.basename(manifest_path)} "
+          f"(commit {prov_record['git_commit']})", flush=True)
 
 
 if __name__ == "__main__":
