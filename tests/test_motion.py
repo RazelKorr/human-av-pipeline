@@ -477,6 +477,31 @@ def test_fixed_clock_ignores_regime():
         assert d.decision_intervals == []
 
 
+# --- Top-decile adaptive clock (2026-10-13 follow-up, Exp iv) ---
+
+def test_adaptive_td_clock_dark_dwells_busy_hurries():
+    d_dark = _run_regime("adaptive_td", "dark")
+    d_busy = _run_regime("adaptive_td", "busy")
+    r_dark = _scanpath_rate(d_dark, 1000.0, 10000.0)
+    r_busy = _scanpath_rate(d_busy, 1000.0, 10000.0)
+    assert r_dark <= 2.2, f"dark regime should dwell, got {r_dark:.2f}/s"
+    # Characterization, not the sealed bar: EXPERIMENTS-2026-10-13
+    # PT.5 sealed busy >= 4.5/s and MISSED (measured 4.29/s on
+    # the transient-fallback path). This test pins the measured
+    # mechanism (busy hurries, separates from dark); the sealed
+    # miss stays on record in the experiments file.
+    assert r_busy >= 4.0, f"busy regime should hurry, got {r_busy:.2f}/s"
+    assert r_busy >= 1.8 * r_dark, (r_dark, r_busy)
+
+
+def test_adaptive_td_clock_interval_bounds():
+    for kind in ("dark", "busy"):
+        d = _run_regime("adaptive_td", kind)
+        assert d.decision_intervals, "adaptive_td must log intervals"
+        for (_, iv) in d.decision_intervals:
+            assert 200.0 - 1e-6 <= iv <= 667.0 + 1e-6, iv
+
+
 # --- Residual (egomotion-compensated) pursuit (2026-10-12, item 8) ---
 
 def _blob_field_thumb(seed=3, tw=96, th=54, n_blobs=14):

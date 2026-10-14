@@ -101,10 +101,12 @@ def main():
                          "compensated (audit item 8). Default: the "
                          "driver's current default")
     ap.add_argument("--saccade-clock", default=None,
-                    choices=["fixed", "adaptive"],
+                    choices=["fixed", "adaptive", "adaptive_td"],
                     help="saccade decision clock: 'fixed' = the "
                          "historical rate; 'adaptive' = luminance + "
-                         "activity modulated (audit item 10). "
+                         "activity modulated (audit item 10); "
+                         "'adaptive_td' = adaptive with a top-decile "
+                         "activity statistic (2026-10-13 follow-up). "
                          "Default: the driver's current default")
     ap.add_argument("--motion-thumb", default=None, metavar="WxH",
                     help="magno-channel thumbnail size, e.g. 160x90 "

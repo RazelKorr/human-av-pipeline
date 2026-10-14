@@ -86,12 +86,108 @@ def build_quiet_room(out_path):
     return cmd
 
 
+CROSSED_DURATION_S = 60.0
+
+
+def build_dark_busy(out_path):
+    """Dark-but-busy crossed fixture (2026-10-13, EXPERIMENTS).
+
+    60 s, 640x360 @ 30 fps. Visual: near-black base (RGB 2) with
+    TWO mid-grey squares in continuous motion (a 70x70 square
+    sweeping horizontally, a 40x40 square sweeping vertically)
+    -- measured mean luma ~0.02, below DARK_LUM 0.03, while
+    local motion is present throughout (busy regime). Audio:
+    brown-noise bed at a clearly audible level plus 12 planted
+    tone bursts (880/660 Hz alternating, 0.3 s, 50 ms fades) at
+    t = 2.5 + 5k s. Ground truth by construction: motion present
+    for the full minute; 12 planted audio events.
+    """
+    # Frames are rendered in numpy and piped as rawvideo: the
+    # drawbox-expression version of this fixture rendered the
+    # squares STATIC (measured motion proxy 0.0, 2026-10-13), so
+    # the moving ground truth is computed per-frame here instead.
+    noise = (f"anoisesrc=color=brown:amplitude=0.05"
+             f":duration={CROSSED_DURATION_S:.0f}:sample_rate=44100"
+             f":seed={QUIET_NOISE_SEED}")
+    bursts = []
+    for k in range(12):
+        freq = 880.0 if k % 2 == 0 else 660.0
+        bursts.append(
+            f"sine=frequency={freq:.0f}:duration=0.3:sample_rate=44100,"
+            "afade=t=in:st=0:d=0.05,afade=t=out:st=0.25:d=0.05,"
+            f"volume=0.6,adelay={int((2.5 + 5 * k) * 1000)}:all=1")
+    inputs = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "640x360",
+              "-r", "30", "-i", "-"]
+    for src in [noise] + bursts:
+        inputs += ["-f", "lavfi", "-i", src]
+    n_audio = 1 + len(bursts)
+    mix_inputs = "".join(f"[{i}:a]" for i in range(1, n_audio + 1))
+    cmd = (["ffmpeg", "-y"] + inputs + [
+        "-filter_complex",
+        f"{mix_inputs}amix=inputs={n_audio}:duration=first:normalize=0[a]",
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", out_path])
+    import math
+    import numpy as _np
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    base = _np.full((360, 640, 3), 2, dtype=_np.uint8)
+    for i in range(int(CROSSED_DURATION_S * 30)):
+        t = i / 30.0
+        fr = base.copy()
+        x1 = int((t * 240.0) % 570.0)
+        y1 = int(140 + 80 * math.sin(3.0 * t))
+        fr[y1:y1 + 70, x1:x1 + 70] = (119, 119, 119)
+        x2 = int(300 + 120 * math.sin(2.0 * t))
+        y2 = int((t * 180.0) % 320.0)
+        fr[y2:y2 + 40, x2:x2 + 40] = (140, 140, 140)
+        proc.stdin.write(fr.tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg dark_busy failed: {proc.returncode}")
+    return cmd
+
+
+def build_bright_silent(out_path):
+    """Bright-but-silent crossed fixture (2026-10-13, EXPERIMENTS).
+
+    60 s, 640x360 @ 30 fps. Visual: solid bright field
+    (0xC8C8C8, luma ~0.78), completely static. Audio: digital
+    silence (anullsrc). Ground truth by construction: zero audio
+    events, zero visual motion/transients; the darkness gate has
+    nothing to engage on, the silence/dwell side has everything.
+    """
+    cmd = ["ffmpeg", "-y",
+           "-f", "lavfi", "-i",
+           (f"color=c=0xC8C8C8:s=640x360:r=30"
+            f":d={CROSSED_DURATION_S:.0f},format=yuv420p"),
+           "-f", "lavfi", "-i",
+           f"anullsrc=channel_layout=mono:sample_rate=44100",
+           "-map", "0:v", "-map", "1:a",
+           "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+           "-c:a", "aac", "-t", f"{CROSSED_DURATION_S:.0f}", out_path]
+    subprocess.run(cmd, check=True)
+    return cmd
+
+
+BUILDERS = {"quiet": build_quiet_room, "dark_busy": build_dark_busy,
+            "bright_silent": build_bright_silent}
+DEFAULT_OUTS = {"quiet": "quiet_room_60s.mp4",
+                "dark_busy": "dark_busy_60s.mp4",
+                "bright_silent": "bright_silent_60s.mp4"}
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(
-        ROOT, "input", "quiet_room_60s.mp4"))
+    ap.add_argument("--kind", choices=sorted(BUILDERS), default="quiet")
+    ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    build_quiet_room(args.out)
+    out = args.out or os.path.join(ROOT, "input",
+                                   DEFAULT_OUTS[args.kind])
+    BUILDERS[args.kind](out)
+    args.out = out
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries",
          "format=duration", "-of", "csv=p=0", args.out],

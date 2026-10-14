@@ -46,6 +46,16 @@ CLOCK_MAX_MS = 667.0        # slowest decision interval (~1.5/s)
 ACT_EMA_TAU_MS = 500.0      # activity/luminance EMA time constant
 ACT_REF_MOTION = 0.010      # magno motion-mean at "normal" activity
 ACT_REF_TRANS = 0.05        # transient-mean at "normal" activity
+# Top-decile variant (2026-10-13 follow-up, EXPERIMENTS Exp iv):
+# the Phase 3 headline missed because whole-frame motion MEANS
+# saturate (bedroom sneak and brawl land on the same busy clip).
+# "adaptive_td" feeds the EMA the per-frame 90th percentile of
+# the motion/transient map instead of its mean; a sparse local
+# mover leaves the 90th percentile low while frame-filling
+# motion raises it. References are scaled for a top-decile of a
+# sparse map (several x its mean).
+ACT_REF_TD_MOTION = 0.06    # magno motion top-decile at "normal"
+ACT_REF_TD_TRANS = 0.25     # transient top-decile at "normal"
 BUSY_MIN = 0.70             # quiet scenes: interval / 0.70 max stretch
 BUSY_MAX = 1.60             # busy scenes: interval / 1.60 max shrink
 
@@ -96,12 +106,14 @@ class OnlineAttentionDriver:
         # clip's regimes saturate the activity statistic), so
         # "fixed" remains the default; see PREDICTIONS.md Phase 3
         # scoring.
-        if saccade_clock not in ("fixed", "adaptive"):
-            raise ValueError("saccade_clock must be 'fixed' or "
-                             f"'adaptive', got {saccade_clock!r}")
+        if saccade_clock not in ("fixed", "adaptive", "adaptive_td"):
+            raise ValueError("saccade_clock must be 'fixed', "
+                             "'adaptive' or 'adaptive_td', got "
+                             f"{saccade_clock!r}")
         self.saccade_clock = saccade_clock
         self._lum_ema = None       # causal scene-luminance EMA
-        self._act_ema = None       # causal activity EMA
+        self._act_ema = None       # causal activity EMA (mean)
+        self._act_td_ema = None    # causal activity EMA (top-decile)
         self.decision_intervals = []  # (t_ms, interval_ms) diagnostic
         # Magno channel: None/0 = off (v2-identical); a positive weight
         # enables motion-energy salience at that weight.
@@ -200,15 +212,18 @@ class OnlineAttentionDriver:
         # activity -- the magno motion mean when the channel is on
         # (it is the signal that separates quiet rooms from brawls),
         # else the visual transient mean.
-        act_inst = (float(motion_map.mean()) if motion_map is not None
-                    else float(self.trans.mean()))
+        act_src = motion_map if motion_map is not None else self.trans
+        act_inst = float(act_src.mean())
+        act_td_inst = float(np.percentile(act_src, 90.0))
         alpha = 1.0 - float(np.exp(-self.dt / ACT_EMA_TAU_MS))
         if self._lum_ema is None:
             self._lum_ema = float(small.mean())
             self._act_ema = act_inst
+            self._act_td_ema = act_td_inst
         else:
             self._lum_ema += alpha * (float(small.mean()) - self._lum_ema)
             self._act_ema += alpha * (act_inst - self._act_ema)
+            self._act_td_ema += alpha * (act_td_inst - self._act_td_ema)
 
         decided = []
         if t >= self.next_decision:
@@ -278,8 +293,14 @@ class OnlineAttentionDriver:
         base = 1000.0 / B.SACCADE_RATE_HZ
         if self.saccade_clock == "fixed" or self._act_ema is None:
             return base
-        ref = ACT_REF_MOTION if self.motion is not None else ACT_REF_TRANS
-        busy = float(np.clip(self._act_ema / ref, BUSY_MIN, BUSY_MAX))
+        if self.saccade_clock == "adaptive_td":
+            ref = (ACT_REF_TD_MOTION if self.motion is not None
+                   else ACT_REF_TD_TRANS)
+            busy = float(np.clip(self._act_td_ema / ref,
+                                 BUSY_MIN, BUSY_MAX))
+        else:
+            ref = ACT_REF_MOTION if self.motion is not None else ACT_REF_TRANS
+            busy = float(np.clip(self._act_ema / ref, BUSY_MIN, BUSY_MAX))
         interval = base * darkness_gain(self._lum_ema) / busy
         interval = float(np.clip(interval, CLOCK_MIN_MS, CLOCK_MAX_MS))
         self.decision_intervals.append((float(t_now), interval))
