@@ -41,9 +41,22 @@ def tone(freq, dur_s, amp=0.5, sr=SR, ramp_ms=5.0):
     return x.astype(np.float32)
 
 
-def click(dur_s=0.02, amp=0.8, sr=SR):
+def _randn(n, seed=None):
+    """Gaussian draws for the battery's noise stimuli (W6,
+    2026-10-14: every stochastic path takes an explicit seed).
+    seed=None keeps the historical behavior -- draws from the
+    global RNG, which run_all seeds -- so filed battery
+    characterizations do not move; a caller that needs a
+    reproducible stimulus passes seed and gets one, from any
+    state of the global RNG."""
+    if seed is None:
+        return np.random.randn(n)
+    return np.random.RandomState(seed).randn(n)
+
+
+def click(dur_s=0.02, amp=0.8, sr=SR, seed=None):
     n = int(dur_s * sr)
-    x = amp * np.random.randn(n).astype(np.float32)
+    x = amp * _randn(n, seed).astype(np.float32)
     x *= np.exp(-np.arange(n) / (n / 6.0))
     return x
 
@@ -64,7 +77,7 @@ def pips(freq, every_s, total_s, dur_s=0.08, amp=0.5, offset_s=0.0):
     return out
 
 
-def room_tone(total_s, amp=0.0003, sr=SR):
+def room_tone(total_s, amp=0.0003, sr=SR, seed=None):
     """A breath of white noise at -70dBFS: present in the waveform, but
     below the -60dBFS hearing floor, so it dithers digital silence
     without faking onsets. (Low hums were tried -- a 50Hz hum under
@@ -72,7 +85,7 @@ def room_tone(total_s, amp=0.0003, sr=SR):
     through its phase. Real rooms hum; this scaffold can't hum cleanly,
     so it stays near-silent instead.)"""
     n = int(total_s * sr)
-    x = np.random.randn(n).astype(np.float32)
+    x = _randn(n, seed).astype(np.float32)
     x *= amp / np.sqrt((x ** 2).mean())
     return x
 
