@@ -231,6 +231,7 @@ def main():
     audio_on = bool(args.audio)
     audio_track, audio_prev_mag, audio_feat_log, audio_proc = \
         None, None, [], []
+    audio_next_mom = 0  # master-grid moment cursor (Fix 4)
     if audio_on:
         try:
             a0 = time.time()
@@ -269,18 +270,31 @@ def main():
         # --- audio: per-chunk cochlear features on the master grid
         if audio_on:
             a0 = time.perf_counter()
-            s0 = int(round(chunk.t0_s * AUDIO_SR))
-            s1 = int(round(chunk.t1_s * AUDIO_SR))
-            seg = audio_track[s0:s1]
-            n_mom = int(round((chunk.t1_s - chunk.t0_s) /
-                              (AUDIO_MOMENT_MS / 1000.0)))
-            need = n_mom * AUDIO_SPM
-            if len(seg) < need:
-                seg = np.pad(seg, (0, need - len(seg)))
-            blocks = seg[:need].reshape(n_mom, AUDIO_SPM)
-            rms, flux, cent, audio_prev_mag = moment_features(
-                blocks, prev_mag=audio_prev_mag)
-            audio_feat_log.append(np.stack([rms, flux, cent], axis=1))
+            # Master-grid slicing (Fix 4, 2026-10-14): this chunk
+            # emits the moments whose start falls in [t0_s, t1_s),
+            # sliced from the track at exact moment-sample offsets
+            # via a running cursor. The previous code sliced at
+            # round(t0_s * SR) -- the frame-timestamp boundary --
+            # which put each chunk's moments on a grid
+            # phase-shifted by (t0_s mod 50 ms) whenever the frame
+            # interval does not divide the moment grid (e.g.
+            # 29.97 fps), so the stored features were not the
+            # master-grid features of the audio track.
+            m_end = int(np.ceil(chunk.t1_s / (AUDIO_MOMENT_MS / 1000.0)
+                                - 1e-9))
+            n_mom = m_end - audio_next_mom
+            if n_mom > 0:
+                s0 = audio_next_mom * AUDIO_SPM
+                s1 = m_end * AUDIO_SPM
+                seg = audio_track[s0:s1]
+                if len(seg) < n_mom * AUDIO_SPM:
+                    seg = np.pad(seg, (0, n_mom * AUDIO_SPM - len(seg)))
+                blocks = seg.reshape(n_mom, AUDIO_SPM)
+                rms, flux, cent, audio_prev_mag = moment_features(
+                    blocks, prev_mag=audio_prev_mag)
+                audio_feat_log.append(np.stack([rms, flux, cent],
+                                               axis=1))
+                audio_next_mom = m_end
             audio_proc.append(time.perf_counter() - a0)
         for (t_ms, f_attn, f_work, f_thumb) in chunk.frames:
             f0 = time.perf_counter()
