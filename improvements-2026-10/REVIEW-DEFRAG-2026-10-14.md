@@ -235,16 +235,167 @@ grid-corrected tight chance.
 
 ---
 
-## Results (appended as each fix lands)
+## Results
+
+### Fix 1 — Binder reporting (commit 2669698, with Fix 3)
+
+`validate_fix1_fix3.log`, FF3 stored streams (3,362 onsets /
+2,735 transients, duration 2701.0 s), `bind()` with defaults:
+shift-null wide mean **0.3609** (sealed 0.34–0.37 ✓), observed
+bound rate 0.3659 at percentile **77.0** (sealed within [5, 95]
+✓). Tight window: grid-corrected chance **0.1409** (sealed
+exactly ✓), observed tight rate 0.1452 vs null mean 0.1456,
+percentile **45.5** — the null's center, replicating the
+investigation's finding (0.1457 vs 0.1461) from a different
+implementation. dt=0 count: observed 158, null mean 163.97,
+percentile 33.5. Mean |dt|: percentile 95.5 — the one statistic
+sitting high in its null, consistent with the investigation's
+~13% material component (real pairs sit slightly farther out
+than shifted chance puts them). New histogram partitions
+n_bound exactly: [0,50): 158, [50,100): 330, [100,250]: 742,
+sum 1,230. Targeted tests: `tests/test_binding_baseline.py`
+**9 passed** (`pytest_fix1_fix3_targeted.log`), including the
+two contract updates (histogram edges; clustered-bin assertion)
+and four new tests.
+
+### Fix 2 — PX.1 (commit 76ef553)
+
+`validate_fix2.log`, real code path (decode → moment_features →
+pick_onsets, defaults): dark-busy **21 picks, planted 12/12, bed
+false alarms 9** (was 42; sealed 21 / 12/12 ✓). Bright-silent
+**0** ✓. FF3 stored-features recount **2,409** (sealed exactly
+✓; filed 3,362 under the 2.0σ bar — reported here, not hidden).
+Consequence check (`ytpmv_rebind_fix2.log`): YTPMV recount drops
+to 212 onsets (filed 362 bound-stream onsets), but rebound under
+the fixed ear its genuine signal survives and cleans up — tight
+excess over grid-corrected chance **+10.8 pts**, shift-null
+tight percentile **97.0**, wide percentile 96.5. Full flagship
+confirmation: run_stream on dark-busy writes 21 audio events,
+12/12 planted (`fix4_dark_runstream.log`). Regression test
+`test_pick_onsets_brown_noise_bed_px1` added; `tests/test_audio.py`
+**18 passed**. One honest caveat: every filed onset count in the
+corpus (FF3 3,362, YTPMV, Star Tours, Dr Tran) was produced
+under the unscaled-MAD bar; counts from runs after this fix are
+not directly comparable to filed ones. That is the cost of the
+bar meaning what k=3 always claimed, and it is why the change
+is one named constant with the experiment trail behind it.
+
+### Fix 3 — bind() ms quantization (commit 2669698, with Fix 1)
+
+`validate_fix1_fix3.log`: rebinding FF3's stored streams in the
+ms-rounded and slot-dust representations now yields **identical
+pair sets, symmetric difference 0** (sealed ✓; pre-fix 71,
+`bind_repro_before.log`). Sealed pair *count* missed: predicted
+1,228 (the pre-fix float matcher's rounded-form result), actual
+**1,230**. Mechanism: the integer matcher compares the window
+edge exactly (250 ≤ 250 binds; the float matcher sometimes
+excluded exact-edge pairs on representation error) and resolves
+true ties deterministically. The defect — representation
+dependence — is eliminated; the count difference is the
+correction, recorded rather than rounded away. Neither rebind
+reproduces the filed 1,208, and cannot: the filed run's float
+forms are not recoverable from ms-rounded artifacts. Future runs
+are self-consistent by construction.
+
+### Fix 4 — run_stream master-grid audio (commit 1dfc7db)
+
+`validate_fix4.log`: flagship run on the 29.97 fps FF3 segment
+(60 s) writes `audio_features.npy` **exactly equal** to the
+whole-track computation — max abs diff **0.0** across all 1,200
+moments (sealed ✓) — and its 42 audio events match whole-track
+pick_onsets exactly. Dark-busy flagship (30 fps): 21 onsets,
+12/12 planted — no-op on aligned material, as sealed
+(`fix4_dark_runstream.log`, `fix4_runstream.log`). Downstream
+note: FF3-class runs (non-20 Hz-divisor frame rates) re-run
+after this fix will produce audio features that differ from the
+filed ones — the filed ones were phase-rotated; onset *counts*
+barely move (the binding window dwarfs the ≤25 ms phase error),
+but feature-level comparisons across the fix boundary are
+invalid, same caveat class as Fix 2.
+
+### Fix 5 — Sidecar truthfulness (commit 885a13d)
+
+`validate_fix5.log`, scratch copy of the FF3 run: sidecar
+`generated` = **2026-10-14** ✓, `shift_null_note` present,
+estimator string covers the grid-corrected chance, and every
+summary field is identical to a fresh `binding_summary` call on
+the same artifacts (sealed ✓). The sidecar's tight-50
+grid-corrected chance reads 0.1409, matching Fix 1's live
+computation.
+
+### Fix 6 — STREAMING-REPORT addendum (commit b728e47)
+
+`git diff` on `streaming/STREAMING-REPORT.md`: **35 insertions,
+0 deletions** (sealed: additions only ✓). The addendum states
+the corrected framing, the investigation's decomposition, and
+the implemented reporting, and leaves every historical number
+standing as written.
 
 ### Baseline vs final suite
 
-(to be filled from the captured final log)
+Baseline (pre-change, `pytest_baseline.log`): **303 passed**.
+Final (`pytest_final.log`): **308 passed, exit 0** — the +5 are
+this pass's new tests (4 in `tests/test_binding_baseline.py`,
+1 in `tests/test_audio.py`); no pre-existing test failed, and
+the only pre-existing tests modified are the two
+`test_binding_baseline.py` assertions pinning the superseded
+histogram contract, updated under Fix 1.
 
 ## Defrag actions taken
 
-(to be filled)
+- Binder investigation outputs moved from the repo root to
+  `improvements-2026-10/logs/binder-investigation/` (git mv;
+  history preserved); the memo's three references to their
+  location updated in place.
+- This commission's diagnostics and validation scripts/logs live
+  in `improvements-2026-10/logs/defrag-2026-10-14/`. Note: the
+  repo's `.gitignore` `logs/` rule leaves that directory
+  untracked (the same convention the 2026-10-13 experiment logs
+  already followed) — the files are on disk and referenced by
+  path from this review; only the review file itself and the
+  code commits are in git.
+- Nothing was deleted. `output/` (4.2 GB, untracked, gitignored)
+  was left exactly as found.
 
 ## Left open
 
-(to be filled)
+1. **`visual_transients` global threshold.** bind_av.py's visual
+   picker uses a global median + k·MAD bar — the design the
+   audio picker's docstring records as failed for audio in
+   2026-10-03. No measured failure exists for the visual picker,
+   and changing it moves every run's transient counts, so it was
+   not touched on suspicion alone. Wants: a measured failure (or
+   a sealed prediction on a fixture with a loud stationary
+   visual bed) before any change. Its MAD is also unscaled
+   (k=4.0 ≈ 2.7σ̂) — if a future change scales it, that is a
+   sensitivity change to be validated like Fix 2, not a
+   consistency freebie.
+2. **Filed-corpus recounts under the fixed ear.** Fix 2 changes
+   onset counts on all real material (FF3 3,362 → 2,409 on
+   stored features; YTPMV rebound and fine). Star Tours and
+   Dr Tran were not recounted — their binding verdicts were
+   "at chance" under both the old bar and (for the tight window)
+   the investigation's corrections, but a clean recount + rebind
+   under the fixed ear and new reporting is a defined, bounded
+   follow-up if the corpus numbers are ever republished.
+3. **Adaptive saccade clock adjudication** (carried from
+   EXPERIMENTS-2026-10-13): still needs fixtures with
+   order-of-magnitude motion contrast; the Pink Panther clip
+   cannot adjudicate. Unchanged by this pass.
+4. **Wide-window grid effects.** The shift null supersedes the
+   closed forms at the wide window, and the investigation showed
+   the naive grid correction runs the wrong way there; no
+   grid-corrected wide Poisson figure was added, deliberately.
+   If a closed-form wide reference is ever wanted, derive it
+   from the slot structure explicitly rather than by analogy
+   with the tight window.
+5. **Phase-5-era doc numbers.** STREAMING-REPORT and
+   improvements-2026-10 summaries quote historical suite counts
+   (159/240/282/301/303) — all true when written, all dated;
+   left as history by the same convention as Fix 6.
+6. **PX.1 residual bed alarms.** 9 false alarms remain on the
+   dark-busy fixture at the corrected 3σ̂ bar — the expected tail
+   of a correctly-set bar over 1,200 moments, not a defect
+   signature. If a future fixture demands fewer, the honest
+   lever is k itself (with the real-material recount that
+   implies), not another per-pick gate.
