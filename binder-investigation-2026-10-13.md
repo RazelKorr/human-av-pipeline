@@ -57,8 +57,8 @@ Sealed: Wodehaus (subagent), 2026-10-13, before running
 ## Evidence trail (verified from artifacts)
 
 (Sections below appended after the sealed predictions, from computations whose
-outputs are captured in `binder-investigation-2026-10-13-output.txt` alongside
-this memo's working notes.)
+outputs are captured in `binder-investigation-2026-10-13-output.txt`
+(moved 2026-10-14 to `improvements-2026-10/logs/binder-investigation/`).
 
 ## SEALED AMENDMENT — maximum-matching diagnostic (written before running it, 2026-10-13)
 
@@ -84,7 +84,8 @@ Files read directly: `output/ff3_hd_av/av_binding.json` +
 `output/exp-2026-10-13/` and `output/drtran_ep4_av/`. Computations captured in
 `binder-investigation-2026-10-13-output.txt`,
 `binder-investigation-2026-10-13-output2.txt`,
-`binder-investigation-2026-10-13-output3.txt` (repo root).
+`binder-investigation-2026-10-13-output3.txt`
+(moved 2026-10-14 to `improvements-2026-10/logs/binder-investigation/`).
 
 ### Headline numbers — verified, not inherited
 
