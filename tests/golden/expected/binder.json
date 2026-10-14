@@ -1,0 +1,192 @@
+{
+ "bound_pairs": [
+  {
+   "audio_strength": 3.0,
+   "audio_t_s": 1.0,
+   "dt_s": -0.05,
+   "visual_strength": 2.0,
+   "visual_t_s": 1.05
+  },
+  {
+   "audio_strength": 2.0,
+   "audio_t_s": 2.05,
+   "dt_s": 0.05,
+   "visual_strength": 1.0,
+   "visual_t_s": 2.0
+  },
+  {
+   "audio_strength": 4.0,
+   "audio_t_s": 4.5,
+   "dt_s": -0.25,
+   "visual_strength": 3.0,
+   "visual_t_s": 4.75
+  },
+  {
+   "audio_strength": 2.5,
+   "audio_t_s": 9.95,
+   "dt_s": -0.05,
+   "visual_strength": 2.0,
+   "visual_t_s": 10.0
+  },
+  {
+   "audio_strength": 3.5,
+   "audio_t_s": 13.0,
+   "dt_s": -0.2,
+   "visual_strength": 1.5,
+   "visual_t_s": 13.2
+  },
+  {
+   "audio_strength": 5.0,
+   "audio_t_s": 20.0,
+   "dt_s": -0.1,
+   "visual_strength": 4.0,
+   "visual_t_s": 20.1
+  }
+ ],
+ "bound_rate": 0.75,
+ "chance_inputs": {
+  "duration_s": 30.0,
+  "duration_source": "caller",
+  "lambda_visual_per_s": 0.33333,
+  "n_visual_transients": 10,
+  "window_ms": 250.0
+ },
+ "chance_rate_poisson": 0.1535,
+ "chance_rate_poisson_label": "non-exclusive uniform-Poisson at-least-one rate: the probability that AT LEAST ONE visual transient of a homogeneous Poisson stream falls in the window. An upper reference, NOT the chance rate of the one-to-one greedy matcher (which cannot count one transient twice and whose streams are bursty and grid-quantized, not uniform). Primary chance context: the shift_null field.",
+ "coincidence_ms": 250.0,
+ "dt_summary": {
+  "asymmetry": {
+   "audio_after_visual": 1,
+   "audio_before_visual": 5,
+   "frac_audio_after_visual": 0.1667,
+   "frac_audio_before_visual": 0.8333,
+   "frac_simultaneous": 0.0,
+   "simultaneous": 0
+  },
+  "histogram_abs_dt_ms": [
+   {
+    "fraction": 0.0,
+    "grid_slots_ms": [
+     0
+    ],
+    "hi_ms": 50.0,
+    "lo_ms": 0.0,
+    "n": 0
+   },
+   {
+    "fraction": 0.5,
+    "grid_slots_ms": [
+     50
+    ],
+    "hi_ms": 100.0,
+    "lo_ms": 50.0,
+    "n": 3
+   },
+   {
+    "fraction": 0.5,
+    "grid_slots_ms": [
+     100,
+     150,
+     200,
+     250
+    ],
+    "hi_ms": 250.0,
+    "lo_ms": 100.0,
+    "n": 3
+   }
+  ],
+  "mean_abs_dt_ms": 116.7,
+  "median_abs_dt_ms": 75.0,
+  "n_pairs": 6
+ },
+ "excess_over_chance": 0.5965,
+ "n_audio_onsets": 8,
+ "n_bound": 6,
+ "n_visual_transients": 10,
+ "shift_null": {
+  "available": true,
+  "bound_rate": {
+   "null_mean": 0.1888,
+   "null_p5": 0.0,
+   "null_p95": 0.375,
+   "null_sd": 0.1418,
+   "observed": 0.75,
+   "observed_percentile": 100.0
+  },
+  "dt0_count": {
+   "null_mean": 0.215,
+   "null_p5": 0.0,
+   "null_p95": 1.0,
+   "null_sd": 0.5,
+   "observed": 0,
+   "observed_percentile": 82.5
+  },
+  "mean_abs_dt_ms": {
+   "null_mean": 127.776,
+   "null_p5": 0.0,
+   "null_p95": 250.0,
+   "null_sd": 75.689,
+   "observed": 116.6667,
+   "observed_percentile": 53.5
+  },
+  "method": "circular time-shift of the visual stream by seeded multiples of the 50 ms moment grid (uniform in [10 s, duration - 10 s]); the same greedy one-to-one matcher re-run per shift",
+  "n_shifts": 200,
+  "seed": 20261014,
+  "tight_rate_50ms": {
+   "null_mean": 0.06,
+   "null_p5": 0.0,
+   "null_p95": 0.25,
+   "null_sd": 0.0954,
+   "observed": 0.375,
+   "observed_percentile": 100.0
+  }
+ },
+ "tight_windows": {
+  "100": {
+   "bound_rate": 0.5,
+   "chance_rate_grid_corrected": 0.08,
+   "chance_rate_poisson": 0.0645,
+   "excess_over_grid_chance": 0.42,
+   "fraction_of_bound": 0.6667,
+   "n_bound": 4,
+   "window_ms": 100.0
+  },
+  "50": {
+   "bound_rate": 0.375,
+   "chance_rate_grid_corrected": 0.0488,
+   "chance_rate_poisson": 0.0328,
+   "excess_over_grid_chance": 0.3262,
+   "fraction_of_bound": 0.5,
+   "n_bound": 3,
+   "window_ms": 50.0
+  }
+ },
+ "unbound_audio": [
+  {
+   "strength": 1.5,
+   "t_s": 7.0
+  },
+  {
+   "strength": 2.0,
+   "t_s": 16.5
+  }
+ ],
+ "unbound_visual": [
+  {
+   "strength": 1.0,
+   "t_s": 6.0
+  },
+  {
+   "strength": 1.0,
+   "t_s": 18.0
+  },
+  {
+   "strength": 1.0,
+   "t_s": 23.0
+  },
+  {
+   "strength": 2.0,
+   "t_s": 26.5
+  }
+ ]
+}
