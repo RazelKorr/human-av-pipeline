@@ -266,9 +266,9 @@ def test_select_llm_backend_api_explicit_key(monkeypatch):
     """ApiGenerator accepts key directly, not just via env."""
     from hva.llm import ApiGenerator
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    gen = ApiGenerator(api_key="sk-direct-key", model="test-model")
+    gen = ApiGenerator(api_key="test-key", model="test-model")
     assert gen.available
-    assert gen.api_key == "sk-direct-key"
+    assert gen.api_key == "test-key"
 
 
 def test_select_llm_backend_local_reachable(monkeypatch):
